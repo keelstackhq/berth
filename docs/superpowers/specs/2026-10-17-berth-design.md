@@ -196,6 +196,9 @@ never exported: they stay in `.env`, read by the app's own loader.
 6. Copy files (§10). Create `<wt>/.berth/tmp` (`/.berth/` is added to `.git/info/exclude`).
 7. Run `[setup].run` in the worktree with the §7 env, output → stderr, with the timeout
    (`--no-setup` skips it).
+   Each hook runs in its own process group; a timeout or failure kills the whole group. Ctrl-C
+   does not reach the hook; if berth dies the hook keeps running and the entry shows
+   `drift: interrupted`.
 8. Retake the repo lock, set `state: ready` (or `failed`), release.
 
 On failure after step 5, berth rolls back (teardown, worktree remove, branch delete if berth made

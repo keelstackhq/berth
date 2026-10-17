@@ -6,6 +6,7 @@ pub mod copy;
 pub mod env;
 pub mod error;
 pub mod git;
+pub mod hooks;
 pub mod lock;
 pub mod manifest;
 pub mod ops;
