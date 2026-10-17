@@ -165,9 +165,13 @@ pub fn discover(dir: &Path) -> Result<Repo, BerthError> {
         None,
     )?;
     if !common.status.success() {
-        return Err(BerthError::Env(
-            "not inside a git repository; run berth from your repo or pass -C <dir>".into(),
-        ));
+        let mut message =
+            String::from("not inside a git repository; run berth from your repo or pass -C <dir>");
+        let stderr = text(&common.stderr);
+        if let Some(first) = stderr.lines().next() {
+            message.push_str(&format!(" (git: {first})"));
+        }
+        return Err(BerthError::Env(message));
     }
     let common_dir = PathBuf::from(text(&common.stdout));
     let common_dir = fs::canonicalize(&common_dir).map_err(|e| io_err(&common_dir, e))?;
@@ -245,7 +249,7 @@ pub fn resolve_commit(main: &Path, rev: &str) -> Result<String, BerthError> {
 
 pub fn check_branch_name(main: &Path, name: &str) -> Result<(), BerthError> {
     let bad = || BerthError::Usage(format!("invalid branch name `{name}`"));
-    if name.starts_with('-') {
+    if name.starts_with('-') || name.contains("@{") {
         return Err(bad());
     }
     // check-ref-format exits 128 (not 1) for an invalid name.

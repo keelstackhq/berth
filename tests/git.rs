@@ -241,3 +241,80 @@ fn verbose_logs_git_to_stderr() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     assert!(!stdout.lines().any(|l| l.starts_with("berth:")), "{stdout}");
 }
+
+#[test]
+fn separate_git_dir_linked_worktree_fails_closed() {
+    let fx = Fixture::new();
+    let root = fx.root.path();
+    let sep = root.join("sep2");
+    let gd = root.join("gd2");
+    fs::create_dir_all(&sep).unwrap();
+    run_git(
+        root,
+        &[
+            "init",
+            "-q",
+            "-b",
+            "main",
+            "--separate-git-dir",
+            gd.to_str().unwrap(),
+            sep.to_str().unwrap(),
+        ],
+    );
+    write(&sep, "f", "1");
+    run_git(&sep, &["add", "f"]);
+    run_git(&sep, &["commit", "-q", "-m", "c"]);
+    let wt = root.join("wt2");
+    run_git(
+        &sep,
+        &["worktree", "add", "-q", "-b", "b2", wt.to_str().unwrap()],
+    );
+    match git::discover(&wt) {
+        Err(e @ BerthError::Env(_)) => {
+            assert_eq!(e.exit_code(), 3);
+            assert!(
+                e.to_string().contains("run berth from the main checkout"),
+                "{e}"
+            );
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn not_a_repo_error_carries_git_stderr() {
+    let fx = Fixture::new();
+    let plain = fx.root.path().join("plain2");
+    fs::create_dir_all(&plain).unwrap();
+    let missing = fx.root.path().join("nope");
+    for dir in [&plain, &missing] {
+        match git::discover(dir) {
+            Err(BerthError::Env(m)) => {
+                assert!(
+                    m.starts_with(
+                        "not inside a git repository; run berth from your repo or pass -C <dir>"
+                    ),
+                    "{m}"
+                );
+                assert!(m.contains(": "), "{m}");
+                assert!(m.lines().count() == 1, "{m}");
+            }
+            other => panic!("{other:?}"),
+        }
+    }
+}
+
+#[test]
+fn branch_name_rejects_reflog_syntax() {
+    let fx = Fixture::new();
+    let main = canon(&fx.repo);
+    for bad in ["@{-1}", "a@{u}", "x@{0}"] {
+        assert!(
+            matches!(
+                git::check_branch_name(&main, bad),
+                Err(BerthError::Usage(_))
+            ),
+            "{bad}"
+        );
+    }
+}

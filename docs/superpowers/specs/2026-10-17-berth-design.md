@@ -178,8 +178,11 @@ never exported: they stay in `.env`, read by the app's own loader.
 
 ## 8. `berth up`, step by step
 
-1. Validate task (2 on error), load config, resolve main checkout (`git rev-parse --git-common-dir`)
-   (3 on error).
+1. Validate task (2 on error), load config, resolve main checkout (3 on error). The main checkout
+   is the first entry of `git worktree list --porcelain -z`. For a `--separate-git-dir` repo git
+   lists the git dir itself first; then main is `git rev-parse --show-toplevel` run from the main
+   checkout, and from a linked worktree of such a repo berth fails closed (exit 3, "run berth from
+   the main checkout"). The common dir is `git rev-parse --git-common-dir`.
 2. Take the repo lock `<git-common-dir>/berth.lock`; then the user lock `<state>/ports.lock`.
    Lock order is always repo → user, so two repos and two tasks cannot deadlock.
 3. Check: task not present (else §3 idempotency), `max` not reached, every `[copy]` match is
