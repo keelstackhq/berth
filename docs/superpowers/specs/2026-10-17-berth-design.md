@@ -1,0 +1,350 @@
+# berth — Design Spec
+
+Date: 2026-10-17 · Status: approved (exit codes follow splice, §3)
+
+Names: repo `keelstackhq/berth`, binary `berth`, Cargo package `berth` if free, else `keel-berth`
+(lib `berth`; check crates.io at plan time, as hoist did), npm launcher `@keelstackhq/berth` with
+platform packages `@keelstackhq/berth-{linux-x64,linux-arm64,darwin-x64,darwin-arm64}` (the splice
+pattern; `win32-x64` from M3).
+
+## 1. Goal
+
+One headless command gives each parallel coding agent a ready, isolated workspace in a repo:
+`berth up <task>` creates a git worktree on its own branch, brings over the untracked files the
+repo needs (`.env` and friends) without showing them to anyone, allocates a block of free ports,
+gives the worktree its own caches and database, runs the repo's setup, and records all of it in a
+manifest other tools can read. `berth down <task>` undoes all of it and refuses to lose work.
+
+Why (evidence: `reports/Developer and agent DX ecosystem.md` §berth; research notes
+`agent_pain_points.md` §9, `toolchain_gaps_2.md` §6, `user_demands.md` Theme 4): agents sharing
+one checkout clobber each other; fresh worktrees lack gitignored files (`.env`); parallel dev
+servers and tests fight over ports and one database; shared caches "stomp on each other"
+(HN 47004368).
+- Incumbents are GUIs (Conductor, Vibe Kanban, Sculptor, Emdash) with OAuth or telemetry
+  objections, or sandboxes (Docker `sbx`, container-use) that isolate but document no port or DB
+  allocation. Nobody owns the headless layer under them. Users also say "I wrote my own", so berth
+  must stay small enough to be obviously cheaper than writing it.
+
+Success:
+- Two `berth up` started at the same instant on example-app give disjoint ports, caches and DBs;
+  both run `pnpm run ci` and their dev servers at the same time.
+- `up` then `down` leaves repo, port registry and disk as before, except the kept task branch.
+- Any harness (Claude Code, Codex, a GUI, a script) drives berth through `--json` and exit codes.
+
+### Non-goals (v1)
+
+- A sandbox. berth isolates *state* (files, ports, caches, DBs), not processes; egress control
+  and microVMs stay with `sbx`, container-use or the harness.
+- A GUI, agent launcher, daemon or hosted service. Every command does its work and exits.
+- Reviewing or merging agent work (the real bottleneck). `berth ls` shows which tasks have commits
+  and which are dirty; comparing diffs across agents is a later tool or a GUI's job.
+- Secret management: berth copies files the owner already has; it never fetches or mints them.
+
+## 2. Positioning
+
+`git worktree`/`claude --worktree` give the worktree only; GUIs add a board but no documented port
+or DB allocation; `sbx`/container-use isolate processes but forward ports by hand. berth adds the
+missing per-task state (files, ports, caches, DB, manifest) and composes with all of them: a GUI or
+`sbx` can call `berth up --json` and use the returned path, ports and env.
+
+## 3. CLI
+
+```
+berth up <task> [--base REF] [--branch NAME] [--no-setup] [--keep-on-failure] [--json]
+berth down <task> [--force] [--delete-branch] [--json]
+berth ls [--json]
+berth env [<task>] [--format sh|fish|dotenv|json]   task defaults to the worktree of the cwd
+berth doctor [--json]
+```
+
+Global flags: `-C <dir>`, `--json`, `--no-color`, `-v`. `<task>` is a slug
+`^[a-z0-9][a-z0-9-]{0,47}$` (it becomes a path segment, a branch suffix and a DB name).
+
+### Exit codes
+
+`0` ok · `1` refused or drift (dirty worktree on `down`, task exists with different settings, a
+copy-listed file git does not ignore, worktree limit reached, `doctor` found drift) · `2` usage
+(bad flags or arguments, invalid task slug; clap usage errors exit 2) · `3` config or environment
+error (unknown `berth.toml` key, git missing or too old, no free port block, lock timeout, setup
+hook failed); the message says how to fix it.
+
+Justification: berth follows splice's scheme (0 ok · 1 refused/drift · 2 usage · 3 config or
+environment) because berth has no human steps, which is what hoist's `2` means. Agents only need
+the rule shared by the family: `0` go, `1` look at `items`, `3` fix the environment.
+
+### Output
+
+Human output: a short table plus the next command (`cd ../hull.berth/fix-login && eval
+"$(berth env)"`). Logs and hook output go to stderr.
+
+`--json` prints exactly one object on stdout:
+`{ "version": 1, "command", "ok", "exit_code", "items": [ { "kind", "key", "action", "reason" } ],
+"worktrees": [ <manifest entry, §6> ] }`. Actions: `create`, `ok`, `remove`, `drift`, `refused`,
+`skipped`. `up` and `env` return one entry in `worktrees`; `ls` returns all. Copied file contents
+never appear in either stream (§8).
+
+### Idempotency
+
+`berth up t` on an existing, healthy task with unchanged config prints the same result with action
+`ok` and exit 0, so a harness can call it on every session start. Same task, different `--base`,
+`--branch` or port count → `drift`, exit 1, nothing changed. `berth down t` on an unknown task →
+`ok`, exit 0.
+
+## 4. `berth.toml`
+
+A seed file at the repo root (hull renders it; the repo owns it afterwards). Unknown keys are an
+error (exit 3, names the key and the file). Every key is optional; no file means the defaults.
+
+```toml
+version = 1
+
+[worktree]
+root = "../{repo}.berth"        # where worktrees live (§5); {repo} = main checkout dir name
+branch_prefix = "berth/"        # branch = branch_prefix + task
+base = "HEAD"                   # default --base; resolved in the main checkout, never fetched
+max = 6                         # refuse a 7th (laptop ceiling reported at ~5-7 agents)
+
+[copy]                          # untracked files copied from the main checkout
+include = [".env", ".env.local", "apps/*/.env.local", ".dev.vars"]
+max_bytes = 1048576             # per file; larger → refused
+
+[ports]
+count = 10                      # block size
+range = [21000, 30999]          # below Linux (32768+) and macOS (49152+) ephemeral ranges
+names = { web = 0, api = 1, storybook = 2, db = 3 }   # → WEB_PORT=base+0, API_PORT=base+1, ...
+
+[env]                           # non-secret values; {placeholders} from §7
+DATABASE_URL = "postgres://localhost:5432/app_{task_snake}"
+COMPOSE_PROJECT_NAME = "{repo}-{task}"
+
+[setup]                         # run in the new worktree, in order, after copy; stderr streamed
+run = ["pnpm install --frozen-lockfile"]
+timeout_secs = 900              # [teardown] has the same keys; runs before removal
+```
+
+No `[copy]` but a `.worktreeinclude` file → its patterns are used (confirm format at plan time).
+
+## 5. Worktree location (decision)
+
+Default: a **sibling directory** `../<repo>.berth/<task>`, not `.worktrees/` inside the repo.
+
+- Node resolution walks up: a worktree under `<repo>/.worktrees/x/` resolves a missing dependency
+  from the main checkout's `node_modules`, hiding phantom-dependency bugs until CI. Some config
+  loaders (`tsconfig` `extends`, `typeRoots`) walk up too.
+- Watchers, linters and editors in the main checkout would see every worktree unless every tool
+  honours `.gitignore`; not all do. A sibling path is still predictable for harnesses.
+
+Cost: harnesses must start in the worktree (they should anyway). `[worktree].root` may point
+inside the repo; `doctor` then checks it is gitignored and warns about upward resolution.
+
+## 6. Manifest and state
+
+Per repo: `<main checkout>/.agents/worktrees.json`, the file other tools read (logbook, hull's
+statusline, GUIs). Runtime state, never committed: hull ships the `.gitignore` line; without it,
+`berth up` adds the path to `.git/info/exclude` (local, untracked) and reports `create`. berth
+never edits tracked files.
+
+```json
+{ "version": 1, "repo": "/abs/hull", "worktrees": [ { "task": "fix-login",
+  "branch": "berth/fix-login", "base": "a1b2c3d", "path": "/abs/hull.berth/fix-login",
+  "state": "ready", "ports": { "start": 21340, "end": 21349, "named": { "web": 21340 } },
+  "env": { "BERTH_TASK": "fix-login", "PORT": "21340" }, "copied": [ ".env" ],
+  "setup": { "status": "ok", "secs": 14.2 }, "created_at": "2026-10-17T09:12:03Z",
+  "owner": { "pid": 4242, "host": "laptop" } } ] }
+```
+
+`state`: `creating` → `ready` | `failed`; `removing`. `copied` lists paths only, never contents or
+hashes. `env` holds only berth-derived and `[env]` values (§7), which are non-secret by rule.
+
+Per user (ports are machine-wide): `$BERTH_STATE_DIR`, else `$XDG_STATE_HOME/berth`, else
+`~/.local/state/berth` (also on macOS): `ports.json` = `{ "version": 1, "blocks": [ { "start",
+"end", "repo", "task", "created_at" } ] }`.
+
+## 7. Environment per worktree
+
+`berth env` prints, and the manifest stores:
+
+- `BERTH_TASK`, `BERTH_ROOT` (main checkout), `BERTH_WORKTREE`, `BERTH_PORT_BASE`,
+  `BERTH_PORT_COUNT`, `PORT` (= base), one `<NAME>_PORT` per `[ports].names` entry.
+- Caches, all inside the worktree (removed with it): `TURBO_CACHE_DIR=<wt>/.turbo/cache`,
+  `VITE_CACHE_PATH=<wt>/node_modules/.vite/task-cache` (the variable hoard reads; confirm Vite+
+  honours it at plan time), `CARGO_TARGET_DIR=<wt>/target` (a shared target dir serialises
+  builds on cargo's lock), `TMPDIR=<wt>/.berth/tmp`.
+- `[env]` values with placeholders `{repo}`, `{task}`, `{task_snake}`, `{port.<name>}`,
+  `{port.base}`, `{worktree}`. Unknown placeholder → exit 3.
+
+Formats: `sh` (`export K='v'`, escaped), `fish`, `dotenv`, `json`. Copied files' values are
+never exported: they stay in `.env`, read by the app's own loader.
+
+## 8. `berth up`, step by step
+
+1. Validate task (2 on error), load config, resolve main checkout (`git rev-parse --git-common-dir`)
+   (3 on error).
+2. Take the repo lock `<git-common-dir>/berth.lock`; then the user lock `<state>/ports.lock`.
+   Lock order is always repo → user, so two repos and two tasks cannot deadlock.
+3. Check: task not present (else §3 idempotency), `max` not reached, every `[copy]` match is
+   ignored by git (`git check-ignore`) — a copy-listed file git would track is refused (exit 1:
+   "add it to .gitignore"), because the agent would commit the secret.
+4. Allocate ports (§9) and write `ports.json`; release the user lock.
+5. `git worktree add -b <branch> <path> <base>` (or check out an existing `--branch`); write the
+   manifest entry with `state: creating`. Release the repo lock.
+6. Copy files (§10). Create `<wt>/.berth/tmp` (`/.berth/` is added to `.git/info/exclude`).
+7. Run `[setup].run` in the worktree with the §7 env, output → stderr, with the timeout
+   (`--no-setup` skips it).
+8. Retake the repo lock, set `state: ready` (or `failed`), release.
+
+On failure after step 5, berth rolls back (teardown, worktree remove, branch delete if berth made
+it and it has no commits, ports freed) and exits 3 with the failed step and the last 20 hook-output
+lines; `--keep-on-failure` keeps it as `failed` for `down` later. Steps 6-7 run unlocked.
+
+Atomic writes: temp file in the same directory, `fsync`, `rename`. Locks: `std::fs::File::lock`
+(advisory; confirm the stable MSRV at plan time), waiting up to 30 s, then exit 3 naming the lock
+holder recorded inside the lock file. A `creating` entry whose owner pid is gone is shown by `ls`
+and `doctor` as `drift: interrupted`; `down` cleans it.
+
+## 9. Port allocation
+
+- Blocks of `count` ports aligned to `count` inside `range` (default 1000 blocks of 10).
+- Preferred block = FNV-1a 64 (implemented in-crate, frozen; never a std hasher, whose output may
+  change) of `repo path + "\0" + task`, mod the number of blocks. Linear probe to the next block.
+  Deterministic: the same task in the same repo usually gets the same ports across up/down cycles,
+  which keeps bookmarks and OAuth callback URLs working.
+- A block is free when no registry entry overlaps it **and** every port binds on `127.0.0.1` and,
+  if IPv6 is available, `[::1]` (bind, then drop at once). This catches non-berth processes.
+- Registry entries whose repo path no longer exists, or whose task is not in that repo's manifest,
+  are stale: `doctor` reports them; `up` reclaims them only after the bind probe passes.
+- The probe is advisory: a process may take a port later; `ls`/`doctor` re-probe and report
+  `drift: port 21341 in use`, killing nothing.
+- No free block → exit 3 with "widen [ports].range or `berth down` unused tasks".
+
+## 10. Copying untracked files
+
+- Candidates come from the main checkout only: `git ls-files --others -z` (ignored and untracked),
+  matched against `[copy].include` globs. Directories are not copied; symlinks are refused (a link
+  could point anywhere); files over `max_bytes` are refused.
+- Copy byte-for-byte (temp file + rename, mode kept, never via a string); an existing target file
+  is left alone (`skipped`).
+- Output names paths and counts only. Contents and hashes never reach stdout, stderr, `--json`,
+  the manifest or logs. A test injects a canary value and asserts it appears nowhere (§13).
+- berth cannot stop an agent reading `.env` in its worktree. Layered defence: berth never exposes
+  values; the harness denies reads (hull's "never read `.env*`" plus a PreToolUse rule, §12).
+
+## 11. `down`, `ls`, `env`, `doctor`
+
+**down**: repo lock → `state: removing`. Refuse (exit 1, nothing changed) when the worktree has
+staged or unstaged changes, or untracked files git does not ignore, unless `--force`. Copied files
+are gitignored by rule (§8.3), so they never block. Commits are safe because the branch is kept;
+`--delete-branch` deletes it only if it is merged into `base` (else refused, exit 1). Then
+teardown hook, `git worktree remove` (`--force` passed through only with berth's `--force`),
+`git worktree prune`, release ports, drop the manifest entry.
+
+**ls**: one row per manifest entry plus unmanaged worktrees under `[worktree].root`
+(`drift: unmanaged`): task, state, branch, ahead/behind, dirty, ports listening, path. Exit 0
+(drift is reported, not fatal) or 3. Read-only, lock-free (atomic renames keep reads consistent).
+
+**env**: prints §7 for `<task>`, or for the berth worktree containing the cwd. Read-only.
+
+**doctor**: read-only checks, each an item: git present and new enough for `worktree add -b` and
+`--porcelain -z` (minimum version decided at plan time); `berth.toml` valid; manifest vs
+`git worktree list` consistent; every manifest path exists; copy patterns ignored by git;
+manifest path ignored; worktree root not inside a tracked directory; stale registry entries;
+reserved ports re-probed; `creating` entries with dead owners. Exit 1 on any drift, 3 on errors.
+
+## 12. Integration with hoard, hull, logbook, hoist
+
+- **hoard.** Isolated caches start cold. Turborepo's remote cache is content-addressed and hoard's
+  keys are immutable with if-not-exists writes, so many worktrees can share one remote safely. M2:
+  `[cache] remote = "hoard"` makes `berth env` export `TURBO_API`/`TURBO_TOKEN`/`TURBO_TEAM` for a
+  `hoard serve --storage fs` the user (or a hull hook) runs; berth does not start or supervise it
+  (no daemon). M2 also evaluates hard-linking the main checkout's `.turbo/cache` entries into a new
+  worktree (valid only if turbo never rewrites entries in place; verify).
+- **hull** (a later step, separate plan in hull): base renders `berth.toml` (seed), the
+  `.agents/worktrees.json` ignore line, a `berth` skill (when to call `up`/`env`/`down`, read the
+  JSON, never read copied files), a SessionStart hook snippet that exports `berth env` when the
+  session starts inside a berth worktree (via the harness's env-file mechanism; confirm Claude
+  Code's at plan time), a PreToolUse deny for `[copy]` paths, a statusline segment
+  (task + `WEB_PORT`) read from the manifest, and one line in the generated `CLAUDE.md`. If a
+  harness offers worktree-create/remove hooks, hull wires them to `berth up --json`/`down`.
+- **logbook** joins agent spend to `task`, `branch` and `path` from the manifest.
+- **hoist** releases berth (M3). **decisions**: D-00x for berth after dogfood.
+
+## 13. Testing
+
+- **Hermetic by rule.** Tests never touch the user's repos, real ports outside the test range, the
+  network or `~`: `tests/common::berth()` sets `BERTH_STATE_DIR` and `HOME` to a temp dir,
+  `GIT_CONFIG_GLOBAL` to an empty file, author env vars, `TMPDIR` to a writable dir, and a test
+  port range unique per test process. No network or TLS crates exist in the dependency tree.
+- **Temp git repos.** Fixtures build repos with `git init` in temp dirs: plain, pnpm-workspace
+  shaped, with `.env` ignored, with `.env` tracked (refusal), with an existing branch.
+- **Unit:** config and unknown keys; placeholders; slot hash (frozen vectors); allocation with a
+  fake prober; manifest round-trip; env formats and shell escaping.
+- **Integration (`tests/cli_*.rs`):** up → ls → env → down cycles; idempotent `up`; dirty `down`
+  refused (exit 1) and `--force`; setup hook failure rolls back (exit 3); `--keep-on-failure`;
+  `doctor` drift cases (deleted worktree dir, unmanaged worktree, stale registry, dead `creating`).
+- **Concurrency:** spawn 8 `berth up` processes at once on one repo and on two repos; assert
+  disjoint port blocks, 8 valid worktrees, a manifest that parses, and no leftover temp files.
+  Kill a process mid-`up` (SIGKILL between steps via a test hook env var) and check recovery.
+- **Port probing:** a test holds a listener in the preferred block; `up` must skip it.
+- **Secrets:** a canary value in a copied `.env`; assert it is absent from stdout, stderr, JSON
+  and the manifest across every command.
+- **Snapshots:** insta for table and JSON output (never blind-accept).
+- **Dogfood:** two agents in parallel on example-app (`pnpm run ci` + dev servers), then hull.
+
+## 14. Repo layout
+
+```
+src/main.rs cli.rs lib.rs   clap (usage errors -> exit 2) -> run(Cli) -> Report -> table/JSON
+src/error.rs report.rs      BerthError (usage 2, config/env 3); Refusal (exit 1); Item, Action, Report
+src/config.rs               berth.toml (deny unknown fields), defaults, .worktreeinclude fallback
+src/manifest.rs registry.rs .agents/worktrees.json; per-user ports.json; atomic writes
+src/lock.rs ports.rs        repo/user locks with owner record; slot hash, block search, bind probe
+src/git.rs copy.rs hooks.rs git CLI wrapper; allow-list copy; setup/teardown runner with timeout
+src/env.rs  src/ops/        placeholders and formats; up down ls env doctor
+tests/                      cli_*.rs, concurrency.rs, secrets.rs, common/mod.rs, snapshots/
+```
+
+## 15. Crates
+
+All fetching-free; versions are **not** stated here and are pinned exactly in the M1 plan after
+`cargo search`/crates.io checks, dated in `docs/PROGRESS.md`:
+
+- `clap` (derive) — CLI. `serde`, `serde_json` — manifest and `--json`. `toml` — config with
+  `deny_unknown_fields`. `thiserror` — error enum. `globset` — copy patterns.
+  `wait-timeout` — hook timeouts (or a std-only loop; decide in the plan).
+- Dev: `tempfile`, `assert_cmd`, `predicates`, `insta` (json, yaml features as needed).
+- Not used: `git2`/`gix` (git CLI, as in splice), any HTTP/TLS crate (no network calls, so the
+  family's "rustls only" rule holds trivially), `dirs` (the state-dir rule is three lines).
+- `#![forbid(unsafe_code)]`; `rust-toolchain.toml` pins hoist's toolchain (verify).
+
+## 16. CI and release
+
+- `.github/workflows/ci.yml`: one job, matrix `ubuntu-latest` + `macos-latest`: `cargo fmt --check`,
+  `cargo clippy --all-targets --locked -- -D warnings`, `cargo test` (nextest if installed). Plus a
+  `ci-ok` aggregate, the family pattern. No network in tests, so no secrets in CI.
+- Release (M3) through `hoist release`: static musl Linux and macOS binaries on GitHub Releases,
+  the npm launcher, `cargo install`; Windows (`win32-x64`, `--format pwsh`) in M3 too.
+
+## 17. Facts to verify before the milestone that needs them
+
+- Crate/npm names; minimum git version for the worktree and `-z` porcelain commands used.
+- `std::fs::File::lock` stable version vs the pinned toolchain; behaviour on macOS APFS and NFS.
+- Vite+: `VITE_CACHE_PATH` is honoured for the task cache; turbo: `TURBO_CACHE_DIR` relative vs
+  absolute handling, and whether cache entries are ever rewritten in place (for M2 hard-linking).
+- Claude Code: `.worktreeinclude` format, worktree-create/remove hook names and payload, and the
+  SessionStart env-file mechanism; Codex equivalents if any.
+
+## 18. Milestones
+
+1. **M1 — core** — `up`, `down`, `ls`, `env`, `doctor`; `berth.toml`; worktree, copy allow-list,
+   port registry + probe, per-worktree caches and `[env]`, setup/teardown hooks, manifest, locks,
+   rollback; tests as §13; CI on Linux + macOS. Dogfood: two agents on example-app.
+2. **M2 — services** — DB providers behind `[db]`: `sqlite` (copy a template file), `postgres`
+   (`createdb -T <template>` / `dropdb`, local server), `compose` (per-task `COMPOSE_PROJECT_NAME`
+   and port mapping); hoard remote-cache export; turbo cache seeding; `berth gc` (remove `ready`
+   tasks whose branch is merged and worktree clean).
+3. **M3 — distribution and integration** — release via hoist, npm launcher, Windows; hull renders
+   `berth.toml`, skill, hooks and statusline segment; D-00x in `keelstackhq/decisions`.
+4. **Later, with evidence** — hosted DB branches (network + token; maybe hoist's), cross-agent
+   diff view for review, disk quotas.
+
+Each milestone gets its own plan in `docs/superpowers/plans/`.
