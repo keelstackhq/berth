@@ -267,6 +267,11 @@ pub fn check_branch_name(main: &Path, name: &str) -> Result<(), BerthError> {
     }
 }
 
+/// Whether `rel` (relative to `main`) is tracked: `git ls-files --error-unmatch` exits 0.
+pub fn is_tracked(main: &Path, rel: &str) -> Result<bool, BerthError> {
+    run_bool(main, &["ls-files", "--error-unmatch", "--", rel])
+}
+
 pub fn branch_exists(main: &Path, name: &str) -> Result<bool, BerthError> {
     let full = format!("refs/heads/{name}");
     run_bool(main, &["show-ref", "--verify", "--quiet", &full])

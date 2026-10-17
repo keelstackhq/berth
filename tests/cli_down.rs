@@ -435,3 +435,47 @@ fn failing_recheck_says_what_already_happened() {
     assert!(branch_exists(&fx.repo, "berth/a"));
     assert!(!wt(&fx, "a").exists());
 }
+
+fn mark_creating(fx: &Fixture, host: &str) {
+    let path = fx.repo.join(".agents/worktrees.json");
+    let mut m: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    m["worktrees"][0]["state"] = "creating".into();
+    m["worktrees"][0]["owner"]["pid"] = std::process::id().into();
+    m["worktrees"][0]["owner"]["host"] = host.into();
+    fs::write(&path, serde_json::to_vec_pretty(&m).unwrap()).unwrap();
+}
+
+#[test]
+fn force_removes_creating_entry_owned_by_another_host() {
+    let fx = Fixture::new();
+    fx.config(&fx.repo, "", "");
+    assert_eq!(code(&up(&fx, &["a"])), 0);
+    mark_creating(&fx, "elsewhere.invalid");
+
+    let out = down(&fx, &["a", "--json"]);
+    assert_eq!(code(&out), 1, "{}", stderr(&out));
+    let reason = json(&out)["items"][0]["reason"]
+        .as_str()
+        .unwrap()
+        .to_string();
+    assert!(reason.contains("berth down --force a"), "{reason}");
+
+    let out = down(&fx, &["a", "--force", "--json"]);
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    assert!(!wt(&fx, "a").exists());
+    assert!(reg_blocks(&fx).is_empty());
+    assert!(manifest_entries(&fx).is_empty());
+}
+
+#[test]
+fn force_still_refuses_a_live_owner_on_this_host() {
+    let fx = Fixture::new();
+    fx.config(&fx.repo, "", "");
+    assert_eq!(code(&up(&fx, &["a"])), 0);
+    mark_creating(&fx, &berth::sys::hostname());
+    let out = down(&fx, &["a", "--force", "--json"]);
+    assert_eq!(code(&out), 1, "{}", stderr(&out));
+    assert_eq!(json(&out)["items"][0]["action"], "refused");
+    assert!(wt(&fx, "a").is_dir());
+    assert_eq!(manifest_entries(&fx)[0]["state"], "creating");
+}

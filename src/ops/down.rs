@@ -36,17 +36,25 @@ pub fn down(ctx: &Ctx, args: &DownArgs) -> Result<Report, BerthError> {
     let cfg = config::load(main)?;
     let path = entry.path.clone();
 
-    // 2. Someone is still creating it.
+    // 2. Someone is still creating it. An owner on another host cannot be verified, so
+    // `--force` may override it; a live pid on this host may be a real `up` and always refuses.
     if entry.state == State::Creating && sys::pid_alive(entry.owner.pid, &entry.owner.host) {
-        return Ok(refused(
-            vec![Item::new(
-                "worktree",
-                task,
-                Action::Refused,
-                format!("task is being created by pid {}", entry.owner.pid),
-            )],
-            &entry,
-        ));
+        let foreign = entry.owner.host != sys::hostname();
+        if !(foreign && args.force) {
+            let reason = if foreign {
+                format!(
+                    "task is being created by pid {} on another host ({}); cannot verify; \
+                     if that up is gone, run berth down --force {task}",
+                    entry.owner.pid, entry.owner.host
+                )
+            } else {
+                format!("task is being created by pid {}", entry.owner.pid)
+            };
+            return Ok(refused(
+                vec![Item::new("worktree", task, Action::Refused, reason)],
+                &entry,
+            ));
+        }
     }
 
     // Only a registered linked worktree is berth's to inspect, run hooks in or remove.

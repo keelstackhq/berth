@@ -98,6 +98,12 @@ pub fn up(ctx: &Ctx, args: &UpArgs) -> Result<Report, BerthError> {
     };
     git::check_branch_name(main, &branch)?;
     let base_sha = git::resolve_commit(main, args.base.as_deref().unwrap_or(&cfg.worktree.base))?;
+    if git::is_tracked(main, MANIFEST_REL)? {
+        return Err(BerthError::Env(format!(
+            "{MANIFEST_REL} is tracked by git; berth never edits tracked files: run \
+             git rm --cached {MANIFEST_REL} and commit"
+        )));
+    }
     let path = worktree_path(repo, &cfg, task);
     let state = registry::state_dir()?;
 
@@ -236,7 +242,12 @@ pub fn up(ctx: &Ctx, args: &UpArgs) -> Result<Report, BerthError> {
 
     // 8. Ready.
     let entry = {
-        let _guard = repo_lock(repo)?;
+        let _guard = repo_lock(repo).map_err(|err| {
+            BerthError::Env(format!(
+                "{err}; setup finished but {task} was not marked ready: run berth down {task}, \
+                 then berth up {task}"
+            ))
+        })?;
         let mut manifest = Manifest::load(main)?;
         let mut done = manifest.find(task).cloned().unwrap_or(entry);
         done.state = State::Ready;

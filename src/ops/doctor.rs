@@ -274,7 +274,8 @@ fn owner_items(manifest: &Manifest) -> Vec<Item> {
                     task,
                     Action::Drift,
                     format!(
-                        "owner on another host ({}); cannot verify; run berth down {task} there",
+                        "owner on another host ({}); cannot verify; run berth down {task} there, \
+                         or berth down --force {task} if that up is gone",
                         e.owner.host
                     ),
                 ))

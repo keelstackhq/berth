@@ -209,3 +209,31 @@ fn lock_timeout_names_holder() {
         "{err}"
     );
 }
+
+#[test]
+fn lock_timeout_after_setup_says_run_down() {
+    let fx = Fixture::new();
+    let marker = fx.root.path().join("setup-started");
+    let setup = format!("[setup]\nrun = [\"touch '{}'; sleep 1\"]", marker.display());
+    fx.config(&fx.repo, "", &setup);
+    let child = fx
+        .berth_std()
+        .current_dir(&fx.repo)
+        .args(["up", "a"])
+        .env("BERTH_LOCK_TIMEOUT_MS", "300")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .unwrap();
+    let deadline = Instant::now() + Duration::from_secs(20);
+    while !marker.exists() {
+        assert!(Instant::now() < deadline, "setup never started");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let common = fs::canonicalize(fx.repo.join(".git")).unwrap();
+    let _guard = lock::acquire(&lock::repo_lock(&common), Duration::from_secs(5)).unwrap();
+    let out = child.wait_with_output().unwrap();
+    let err = String::from_utf8_lossy(&out.stderr);
+    assert_eq!(out.status.code(), Some(3), "{err}");
+    assert!(err.contains("berth down a"), "{err}");
+}

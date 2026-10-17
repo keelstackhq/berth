@@ -76,7 +76,9 @@ to fix it). With `--json`, stdout is exactly one object
 - Hooks run in their own process group, so Ctrl-C does not reach them. A killed `berth` leaves
   the task as `drift: interrupted`; run `berth down <task>` and `berth up` again.
 - A task whose owner runs on another host counts as alive: `ls` never clears it. `doctor`
-  reports a `creating` entry owned by another host as drift ("cannot verify").
+  reports a `creating` entry owned by another host as drift ("cannot verify"). `down` refuses
+  it too; if that `up` is gone, `berth down --force <task>` removes it. A live `up` on this host
+  always refuses `down`, even with `--force`.
 - berth never edits tracked files. The lines it adds to `.git/info/exclude` stay after
   `down`; they are harmless.
 - A repo whose `.gitignore` lacks `.turbo/` or `target/` will see `down` refuse after builds

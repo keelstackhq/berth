@@ -67,3 +67,42 @@ fn fixture_is_hermetic() {
     let listing = common::git(&fx.repo, &["config", "--global", "--list"]);
     assert_eq!(listing.trim(), "");
 }
+
+fn usage_json(args: &[&str]) -> (serde_json::Value, String) {
+    let fx = Fixture::new();
+    let out = fx.berth().args(args).assert().code(2).get_output().clone();
+    let stderr = String::from_utf8_lossy(&out.stderr).into_owned();
+    let value: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap_or_else(|e| {
+        panic!(
+            "stdout is not one JSON object ({e}): {:?}",
+            String::from_utf8_lossy(&out.stdout)
+        )
+    });
+    (value, stderr)
+}
+
+#[test]
+fn usage_error_with_json_prints_one_report() {
+    let (v, stderr) = usage_json(&["up", "Bad Slug", "--json"]);
+    assert_eq!(v["version"], 1);
+    assert_eq!(v["command"], "up");
+    assert_eq!(v["ok"], false);
+    assert_eq!(v["exit_code"], 2);
+    assert_eq!(v["items"][0]["kind"], "error");
+    assert_eq!(v["items"][0]["key"], "usage");
+    assert_eq!(v["items"][0]["action"], "refused");
+    assert!(v["worktrees"].as_array().unwrap().is_empty(), "{v}");
+    assert!(stderr.contains("Bad Slug"), "{stderr}");
+
+    let (v, _) = usage_json(&["--json", "down"]);
+    assert_eq!(v["command"], "down", "{v}");
+}
+
+#[test]
+fn unknown_subcommand_with_json_prints_one_report() {
+    let (v, stderr) = usage_json(&["nope", "--json"]);
+    assert_eq!(v["command"], "unknown");
+    assert_eq!(v["exit_code"], 2);
+    assert_eq!(v["items"][0]["key"], "usage");
+    assert!(stderr.contains("nope"), "{stderr}");
+}

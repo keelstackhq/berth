@@ -1,6 +1,6 @@
 #![forbid(unsafe_code)]
 
-use berth::{Cli, Report, render_json, render_table};
+use berth::{BerthError, Cli, Report, render_json, render_table};
 use clap::Parser;
 use clap::error::ErrorKind;
 use std::io::IsTerminal;
@@ -15,6 +15,9 @@ fn main() -> ExitCode {
                 _ => 2,
             };
             let _ = err.print();
+            if code == 2 {
+                print_usage_json(&err);
+            }
             return ExitCode::from(code);
         }
     };
@@ -46,4 +49,33 @@ fn print_report(report: &Report, json: bool, color: bool) {
     } else {
         print!("{}", render_table(report, color));
     }
+}
+
+const COMMANDS: [&str; 5] = ["up", "down", "ls", "env", "doctor"];
+
+/// A clap usage error with `--json` anywhere in argv still prints one Report (exit 2) on stdout;
+/// the usage text has already gone to stderr.
+fn print_usage_json(err: &clap::Error) {
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if !args.iter().any(|a| a == "--json") {
+        return;
+    }
+    let message = err.render().to_string();
+    let first = message.lines().next().unwrap_or("usage error");
+    let reason = first.strip_prefix("error: ").unwrap_or(first).to_string();
+    let report = Report::from_error(command_from_args(&args), &BerthError::Usage(reason));
+    println!("{}", render_json(&report));
+}
+
+/// The subcommand named by the first positional argument, or `"unknown"`.
+fn command_from_args(args: &[String]) -> &'static str {
+    let mut iter = args.iter();
+    while let Some(arg) = iter.next() {
+        if arg == "-C" || arg == "--format" {
+            iter.next();
+        } else if !arg.starts_with('-') {
+            return COMMANDS.into_iter().find(|c| c == arg).unwrap_or("unknown");
+        }
+    }
+    "unknown"
 }

@@ -188,7 +188,8 @@ never exported: they stay in `.env`, read by the app's own loader.
    checkout, and from a linked worktree of such a repo berth fails closed (exit 3, "run berth from
    the main checkout"). The common dir is `git rev-parse --git-common-dir`. The branch name is
    checked (`git check-ref-format --branch`, exit 2) and the base resolved (exit 3) here, before
-   any lock, port or file.
+   any lock, port or file. A manifest tracked by git (`git ls-files --error-unmatch
+   .agents/worktrees.json`) is exit 3: "run git rm --cached .agents/worktrees.json".
 2. Take the repo lock `<git-common-dir>/berth.lock`. The user lock `<state>/ports.lock` is taken
    in step 4 only. Lock order is always repo → user, so two repos and two tasks cannot deadlock.
 3. Check: task not present (else §3 idempotency; a `creating` entry whose owner is alive → exit 1
@@ -211,7 +212,8 @@ never exported: they stay in `.env`, read by the app's own loader.
    `drift: interrupted`.
    A timeout fails the hook with status `timed out after Ns`; output readers are given 1 s to
    finish after the kill, then dropped, so a process that left the group cannot hang berth.
-8. Retake the repo lock, set `state: ready` (or `failed`), release.
+8. Retake the repo lock, set `state: ready` (or `failed`), release. A lock timeout here exits 3
+   and says to run `berth down <task>` (setup finished; the entry stays `creating`).
 
 On failure after step 5, berth rolls back (teardown, worktree remove, branch delete if berth made
 it and it has no commits, ports freed) and exits 3 with the failed step and the last 20 hook-output
@@ -265,7 +267,10 @@ are gitignored by rule (§8.3), so they never block. Commits are safe because th
 teardown hook, `git worktree remove` (`--force` passed through only with berth's `--force`),
 `git worktree prune`, release ports, drop the manifest entry.
 `down` refuses (exit 1) while a live process is still creating the task, and `--delete-branch`
-resolves `[worktree].base` at that moment. It only inspects, runs hooks in and removes a path that
+resolves `[worktree].base` at that moment. An owner on another host cannot be verified and counts
+as live; there the refusal (and `doctor`'s "cannot verify" item) names `berth down --force <task>`,
+and `--force` skips this refusal. A live owner pid on this host refuses even with `--force` (it
+may be a real running `up`). `down` only inspects, runs hooks in and removes a path that
 `git worktree list` reports as a linked worktree; any other directory is left in place (item
 `skipped`). A task without an entry just frees any orphaned port block. Lines `up` added to
 `info/exclude` stay. A teardown hook may commit, so `--delete-branch` re-checks the merge state

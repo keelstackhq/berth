@@ -744,3 +744,24 @@ fn keep_on_failure_copy_refusal_records_skipped() {
     assert_eq!(entries[0]["state"], "failed");
     assert_eq!(entries[0]["setup"]["status"], "skipped");
 }
+
+#[test]
+fn tracked_manifest_is_refused() {
+    let fx = Fixture::new();
+    fx.config(&fx.repo, "", "");
+    assert_eq!(code(&up(&fx, &["a"])), 0);
+    git(&fx.repo, &["add", "-f", ".agents/worktrees.json"]);
+    git(&fx.repo, &["commit", "-qm", "track manifest"]);
+    let out = up(&fx, &["b", "--json"]);
+    assert_eq!(code(&out), 3, "{}", stderr(&out));
+    let v = json(&out);
+    assert!(
+        v["items"][0]["reason"]
+            .as_str()
+            .unwrap()
+            .contains("git rm --cached .agents/worktrees.json"),
+        "{v}"
+    );
+    assert!(!wt(&fx, "b").exists());
+    assert_eq!(manifest_entries(&fx).len(), 1);
+}

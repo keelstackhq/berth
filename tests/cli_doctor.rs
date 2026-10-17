@@ -298,7 +298,11 @@ fn creating_entry_on_another_host_is_drift() {
             && i["reason"]
                 .as_str()
                 .unwrap()
-                .contains("owner on another host (elsewhere.invalid); cannot verify")),
+                .contains("owner on another host (elsewhere.invalid); cannot verify")
+            && i["reason"]
+                .as_str()
+                .unwrap()
+                .contains("berth down --force a")),
         "{v}"
     );
 }
