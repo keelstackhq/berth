@@ -302,7 +302,18 @@ fn non_utf8_path_refused_without_failing_plan() {
     use std::os::unix::ffi::OsStrExt;
     let fx = Fixture::new();
     ignore(&fx, "bad*\n");
-    fs::write(fx.repo.join(OsStr::from_bytes(b"bad\xff")), "x").unwrap();
+    // APFS (macOS) rejects non-UTF-8 names with EILSEQ, so such a path cannot exist there and
+    // there is nothing to refuse; every other platform must run the assertions below.
+    match fs::write(fx.repo.join(OsStr::from_bytes(b"bad\xff")), "x") {
+        Ok(()) => {}
+        Err(e)
+            if cfg!(target_os = "macos")
+                && e.raw_os_error() == Some(92 /* EILSEQ on macOS */) =>
+        {
+            return;
+        }
+        Err(e) => panic!("create non-UTF-8 file: {e}"),
+    }
     write(&fx.repo, ".env", "A=1\n");
     let p = plan(&fx, &["bad*", ".env"]);
     assert_eq!(p.files, vec![".env".to_string()]);
