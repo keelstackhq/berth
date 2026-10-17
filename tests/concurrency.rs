@@ -99,10 +99,6 @@ fn eight_ups_one_repo() {
     tmp_leftovers(&fx.repo.join(".agents"), &mut found);
     tmp_leftovers(&fx.state, &mut found);
     for e in entries {
-        tmp_leftovers(
-            &PathBuf::from(e["path"].as_str().unwrap()).join(".berth/tmp"),
-            &mut found,
-        );
         let staging = PathBuf::from(e["path"].as_str().unwrap()).join(".berth/tmp");
         let files: Vec<_> = fs::read_dir(&staging)
             .map(|rd| rd.flatten().map(|e| e.path()).collect())

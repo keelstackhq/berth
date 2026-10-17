@@ -31,6 +31,20 @@ fn canary_never_printed() {
     common::git(&fx.repo, &["commit", "-q", "-m", "ignore vars"]);
 
     let mut seen = Vec::new();
+    let scan_files = |when: &str| {
+        for file in [
+            fx.repo.join(".agents/worktrees.json"),
+            fx.state.join("ports.json"),
+        ] {
+            let text = fs::read_to_string(&file).unwrap_or_default();
+            assert!(!text.is_empty(), "{file:?} is empty {when}");
+            for canary in [ENV_CANARY, VARS_CANARY] {
+                assert!(!text.contains(canary), "canary in {file:?} {when}");
+            }
+        }
+    };
+    // The first (plain) run of each command must succeed. Repeats (--json, -v, a second `up`,
+    // `down` after the entry is gone) may legitimately exit 1 or 3, never 2 (usage).
     let mut ok = |args: &[&str]| {
         for json in [false, true] {
             for verbose in [false, true] {
@@ -41,31 +55,31 @@ fn canary_never_printed() {
                 if verbose {
                     full.push("-v");
                 }
-                run(&fx, &full, &mut seen);
+                let out = run(&fx, &full, &mut seen);
+                let code = out.status.code();
+                if !json && !verbose {
+                    assert_eq!(code, Some(0), "{full:?}: {}", seen.last().unwrap().1);
+                } else {
+                    assert!(matches!(code, Some(0 | 1 | 3)), "{full:?} exited {code:?}");
+                }
             }
         }
     };
     ok(&["up", "a"]);
+    scan_files("after up");
     ok(&["up", "a"]);
     ok(&["ls"]);
     for format in ["sh", "fish", "dotenv", "json"] {
         ok(&["env", "a", "--format", format]);
     }
+    scan_files("after env");
     ok(&["doctor"]);
+    scan_files("before down");
     ok(&["down", "a"]);
 
     for (args, text) in &seen {
         for canary in [ENV_CANARY, VARS_CANARY] {
             assert!(!text.contains(canary), "canary in output of {args}");
-        }
-    }
-    for file in [
-        fx.repo.join(".agents/worktrees.json"),
-        fx.state.join("ports.json"),
-    ] {
-        let text = fs::read_to_string(&file).unwrap_or_default();
-        for canary in [ENV_CANARY, VARS_CANARY] {
-            assert!(!text.contains(canary), "canary in {file:?}");
         }
     }
 

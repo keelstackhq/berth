@@ -142,14 +142,22 @@ fn doctor_writes_nothing() {
     let fx = Fixture::new();
     fx.config(&fx.repo, "", "");
     let other = fx.add_repo("other");
-    let (lo, _) = fx.range;
-    let reg = format!(
-        r#"{{"version":1,"blocks":[{{"start":{lo},"end":{},"repo":"{}","task":"t","created_at":"2026-10-17T00:00:00Z"}}]}}"#,
-        lo + 9,
-        other.display()
-    );
-    write(&fx.state, "ports.json", &reg);
     up(&fx, "a");
+    // Add a stale block of another repo after `up` (which prunes stale blocks), in a slot that
+    // `a` does not hold.
+    let (lo, _) = fx.range;
+    let ports = fx.state.join("ports.json");
+    let mut reg: Value = serde_json::from_slice(&fs::read(&ports).unwrap()).unwrap();
+    let taken = reg["blocks"][0]["start"].as_u64().unwrap();
+    let start = if taken == u64::from(lo) { lo + 10 } else { lo };
+    reg["blocks"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({
+            "start": start, "end": start + 9, "repo": other.display().to_string(),
+            "task": "t", "created_at": "2026-10-17T00:00:00Z"
+        }));
+    fs::write(&ports, serde_json::to_vec_pretty(&reg).unwrap()).unwrap();
     let git_a = fx.repo.join(".git");
     let git_b = other.join(".git");
     let before = snapshot(&[&git_a, &git_b, &fx.state, &fx.repo]);
@@ -270,4 +278,27 @@ fn live_creating_entry_is_in_progress_not_drift() {
     assert_eq!(code, 0, "{v}");
     let manifest = items(&v, "manifest");
     assert!(manifest.iter().any(|i| i["reason"] == "creating"), "{v}");
+}
+
+#[test]
+fn creating_entry_on_another_host_is_drift() {
+    let fx = Fixture::new();
+    fx.config(&fx.repo, "", "");
+    up(&fx, "a");
+    mark_creating_live(&fx);
+    let path = fx.repo.join(".agents/worktrees.json");
+    let mut m: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    m["worktrees"][0]["owner"]["host"] = "elsewhere.invalid".into();
+    fs::write(&path, serde_json::to_vec_pretty(&m).unwrap()).unwrap();
+    let (code, v) = doctor(&fx);
+    assert_eq!(code, 1, "{v}");
+    let owner = items(&v, "owner");
+    assert!(
+        owner.iter().any(|i| i["action"] == "drift"
+            && i["reason"]
+                .as_str()
+                .unwrap()
+                .contains("owner on another host (elsewhere.invalid); cannot verify")),
+        "{v}"
+    );
 }

@@ -17,8 +17,11 @@ use crate::{BerthError, Ctx, config, git, sys};
 const EXCLUDED: [&str; 2] = [".agents/worktrees.json", ".berth/x"];
 
 /// A `creating` entry whose owner is alive on this host is an `up` in progress, not drift.
+/// An owner on another host cannot be verified, so it is never exempt.
 fn in_progress(e: &crate::manifest::Entry) -> bool {
-    e.state == State::Creating && sys::pid_alive(e.owner.pid, &e.owner.host)
+    e.state == State::Creating
+        && e.owner.host == sys::hostname()
+        && sys::pid_alive(e.owner.pid, &e.owner.host)
 }
 
 fn canon(path: &Path) -> PathBuf {
@@ -258,23 +261,39 @@ fn port_items(manifest: &Manifest) -> Vec<Item> {
 }
 
 fn owner_items(manifest: &Manifest) -> Vec<Item> {
-    let dead: Vec<Item> = manifest
+    let here = sys::hostname();
+    let bad: Vec<Item> = manifest
         .worktrees
         .iter()
-        .filter(|e| e.state == State::Creating && !sys::pid_alive(e.owner.pid, &e.owner.host))
-        .map(|e| {
-            Item::new(
-                "owner",
-                e.task.as_str(),
-                Action::Drift,
-                format!(
-                    "interrupted: owner pid {} is gone; run berth down {}",
-                    e.owner.pid, e.task
-                ),
-            )
+        .filter(|e| e.state == State::Creating)
+        .filter_map(|e| {
+            let task = e.task.as_str();
+            if e.owner.host != here {
+                Some(Item::new(
+                    "owner",
+                    task,
+                    Action::Drift,
+                    format!(
+                        "owner on another host ({}); cannot verify; run berth down {task} there",
+                        e.owner.host
+                    ),
+                ))
+            } else if !sys::pid_alive(e.owner.pid, &e.owner.host) {
+                Some(Item::new(
+                    "owner",
+                    task,
+                    Action::Drift,
+                    format!(
+                        "interrupted: owner pid {} is gone; run berth down {task}",
+                        e.owner.pid
+                    ),
+                ))
+            } else {
+                None
+            }
         })
         .collect();
-    if dead.is_empty() {
+    if bad.is_empty() {
         return vec![Item::new(
             "owner",
             "creating",
@@ -282,5 +301,5 @@ fn owner_items(manifest: &Manifest) -> Vec<Item> {
             "no interrupted creations",
         )];
     }
-    dead
+    bad
 }
