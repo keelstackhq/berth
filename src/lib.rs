@@ -4,6 +4,7 @@ pub mod cli;
 pub mod config;
 pub mod env;
 pub mod error;
+pub mod lock;
 pub mod manifest;
 pub mod ops;
 pub mod registry;
