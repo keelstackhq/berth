@@ -123,6 +123,8 @@ timeout_secs = 900              # [teardown] has the same keys; runs before remo
 ```
 
 No `[copy]` but a `.worktreeinclude` file → its patterns are used (confirm format at plan time).
+`.worktreeinclude` matches that git does not ignore are `skipped` (Claude Code behaviour); `[copy]`
+matches that git does not ignore are `refused`.
 
 ## 5. Worktree location (decision)
 
@@ -312,8 +314,8 @@ All fetching-free; versions are **not** stated here and are pinned exactly in th
 `cargo search`/crates.io checks, dated in `docs/PROGRESS.md`:
 
 - `clap` (derive) — CLI. `serde`, `serde_json` — manifest and `--json`. `toml` — config with
-  `deny_unknown_fields`. `thiserror` — error enum. `globset` — copy patterns.
-  `wait-timeout` — hook timeouts (or a std-only loop; decide in the plan).
+  `deny_unknown_fields`. `thiserror` — error enum. `globset` not used: git matches the copy patterns via
+  `ls-files --exclude`/`--exclude-from`. `wait-timeout` not used: std `try_wait` loop for hook timeouts.
 - Dev: `tempfile`, `assert_cmd`, `predicates`, `insta` (json, yaml features as needed).
 - Not used: `git2`/`gix` (git CLI, as in splice), any HTTP/TLS crate (no network calls, so the
   family's "rustls only" rule holds trivially), `dirs` (the state-dir rule is three lines).
