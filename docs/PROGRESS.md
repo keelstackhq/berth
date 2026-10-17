@@ -2,7 +2,7 @@
 
 ## Status
 
-Milestone 1, plan `docs/superpowers/plans/2026-10-17-berth-m1.md`: Tasks 1-10 done.
+Milestone 1, plan `docs/superpowers/plans/2026-10-17-berth-m1.md`: Tasks 1-15 done (M1 complete pending whole-branch review).
 
 ## Done
 
@@ -20,6 +20,7 @@ Milestone 1, plan `docs/superpowers/plans/2026-10-17-berth-m1.md`: Tasks 1-10 do
 - 2026-10-17 · Task 12 · `berth ls` (lock-free; ahead/behind, dirty, listening ports, missing/interrupted/unmanaged drift) and `berth env` (task or cwd; `--json` vs `--format`); `down` re-checks merge state before `branch -D`, says "pass --force" when worktree remove fails, reuses up's `unreserve`; spec §9/§11 amended · `cargo test --test cli_ls_env` 12/12, `cli_down` 13/13
 - 2026-10-17 · Task 13 · `berth doctor` (lock-free, writes no file; git, config, copy, root, registry, manifest, exclude, port, owner items; exit 1 on drift); spec §11 amended · `cargo test --test cli_doctor` 11/11
 - 2026-10-17 · Task 14 · concurrency (8 ups/1 repo, 4+4 ups/2 repos, killed up recovers, lock timeout names holder) and secret canaries; doctor treats a live `creating` owner as in progress · concurrency x5 4/4 each, secrets 1/1, cli_doctor 12/12
+- 2026-10-17 · Task 15 · dogfood on a fresh clone of keelstackhq/example-app + README · `up a`/`up b` in parallel exit 0, ports 29710-29719 and 21820-21829, `setup.secs` 4.2 and 4.1 (`pnpm install --frozen-lockfile`, 4.3 s wall); `pnpm run ci` in both at once exit 0, 21/21 tasks, 22.9 s; both `vp dev` servers on `WEB_PORT` answered 200 together; `doctor` 0.1 s over a 550 MB `node_modules` (17.9k files); turbo cache under `TURBO_CACHE_DIR` (63 entries each), Vite+ wrote no task cache under `VITE_CACHE_PATH` (packages never call `vp run`); after `down a`, `down b` `git worktree list` equals the start and `ports.json` has `"blocks": []`; spec §17 updated
 
 ## Blocked
 

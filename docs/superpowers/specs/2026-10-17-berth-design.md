@@ -368,6 +368,13 @@ All fetching-free; versions are **not** stated here and are pinned exactly in th
 - `std::fs::File::lock` stable version vs the pinned toolchain; behaviour on macOS APFS and NFS.
 - Vite+: `VITE_CACHE_PATH` is honoured for the task cache; turbo: `TURBO_CACHE_DIR` relative vs
   absolute handling, and whether cache entries are ever rewritten in place (for M2 hard-linking).
+- Verified 2026-10-17 (M1 dogfood, keelstackhq/example-app, Vite+ 1.1.0, turbo 2.11.8, pnpm 12.11.2):
+  `TURBO_CACHE_DIR=<wt>/.turbo/cache` is honoured (63 entries after `pnpm run ci`, none in the main
+  checkout). `VITE_CACHE_PATH` produced no `task-cache` directory: packages call `vp test/lint/...`
+  directly (never `vp run`), so Vite+ writes no task cache; only vitest's per-package
+  `node_modules/.vite` appears. Whether `VITE_CACHE_PATH` is honoured by `vp run` stays unverified.
+  Two worktrees ran `pnpm run ci` (21/21 tasks, exit 0) and two `vp dev` servers on their own
+  `WEB_PORT` at the same time.
 - Claude Code: `.worktreeinclude` format, worktree-create/remove hook names and payload, and the
   SessionStart env-file mechanism; Codex equivalents if any.
 
