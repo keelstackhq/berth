@@ -450,15 +450,16 @@ pub fn commits_since(main: &Path, base: &str, branch: &str) -> Result<u32, Berth
     })
 }
 
-/// `git ls-files -z <args>` in `main`, as paths. Only the patterns passed in `args` are used:
-/// callers never add `--exclude-standard`, so ignored directories are not filtered out.
-pub fn ls_files(main: &Path, args: &[String]) -> Result<Vec<String>, BerthError> {
+/// `git ls-files -z <args>` in `main`, as raw path bytes (paths need not be UTF-8). Only the
+/// patterns passed in `args` are used: callers never add `--exclude-standard`, so ignored
+/// directories are not filtered out.
+pub fn ls_files(main: &Path, args: &[String]) -> Result<Vec<Vec<u8>>, BerthError> {
     let mut full: Vec<&OsStr> = vec![OsStr::new("ls-files"), OsStr::new("-z")];
     full.extend(args.iter().map(OsStr::new));
     let out = run_os(main, &full)?;
     Ok(out
         .split(|b| *b == 0)
         .filter(|f| !f.is_empty())
-        .map(|f| String::from_utf8_lossy(f).into_owned())
+        .map(<[u8]>::to_vec)
         .collect())
 }

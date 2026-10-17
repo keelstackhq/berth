@@ -34,6 +34,22 @@ fn anchored(glob: &str) -> String {
     format!("/{}", glob.trim_start_matches('/'))
 }
 
+/// Valid UTF-8 paths; any other path is refused on its own so the plan still succeeds.
+fn utf8_paths(raw: Vec<Vec<u8>>, plan: &mut CopyPlan) -> Vec<String> {
+    let mut ok = Vec::new();
+    for bytes in raw {
+        match String::from_utf8(bytes) {
+            Ok(p) => ok.push(p),
+            Err(e) => {
+                let shown = String::from_utf8_lossy(e.as_bytes()).into_owned();
+                plan.refused
+                    .push(item(&shown, Action::Refused, "path is not valid UTF-8"));
+            }
+        }
+    }
+    ok
+}
+
 pub fn plan_copy(repo: &Repo, src: &CopySource, max_bytes: u64) -> Result<CopyPlan, BerthError> {
     let main = &repo.main;
     let mut plan = CopyPlan::default();
@@ -48,7 +64,8 @@ pub fn plan_copy(repo: &Repo, src: &CopySource, max_bytes: u64) -> Result<CopyPl
                 .collect();
             let mut tracked_args = vec!["--cached".to_string(), "--ignored".to_string()];
             tracked_args.extend(excludes.iter().cloned());
-            for path in git::ls_files(main, &tracked_args)? {
+            let tracked = git::ls_files(main, &tracked_args)?;
+            for path in utf8_paths(tracked, &mut plan) {
                 let reason = format!(
                     "tracked by git; run `git rm --cached {path}` and add it to .gitignore"
                 );
@@ -56,7 +73,7 @@ pub fn plan_copy(repo: &Repo, src: &CopySource, max_bytes: u64) -> Result<CopyPl
             }
             let mut args = vec!["--others".to_string(), "--ignored".to_string()];
             args.extend(excludes);
-            let found = git::ls_files(main, &args)?;
+            let found = utf8_paths(git::ls_files(main, &args)?, &mut plan);
             let ignored = git::ignored(main, &found)?;
             let mut keep = Vec::new();
             for path in found {
@@ -78,7 +95,7 @@ pub fn plan_copy(repo: &Repo, src: &CopySource, max_bytes: u64) -> Result<CopyPl
                 "--ignored".to_string(),
                 format!("--exclude-from={}", file.display()),
             ];
-            let found = git::ls_files(main, &args)?;
+            let found = utf8_paths(git::ls_files(main, &args)?, &mut plan);
             let ignored = git::ignored(main, &found)?;
             let mut keep = Vec::new();
             for path in found {
@@ -136,7 +153,9 @@ fn symlink_in_parents(wt: &Path, rel: &str) -> Result<bool, BerthError> {
     Ok(false)
 }
 
-fn copy_one(src: &Path, target: &Path, tmp_dir: &Path) -> Result<(), BerthError> {
+/// Stage `src` in `tmp_dir`, then link it into place. `Ok(false)` when `target` appeared
+/// meanwhile: an existing file is never replaced.
+fn copy_one(src: &Path, target: &Path, tmp_dir: &Path) -> Result<bool, BerthError> {
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let tmp: PathBuf = tmp_dir.join(format!("copy-{}-{n}", std::process::id()));
@@ -148,28 +167,69 @@ fn copy_one(src: &Path, target: &Path, tmp_dir: &Path) -> Result<(), BerthError>
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent).map_err(|e| io_err(parent, e))?;
         }
-        fs::rename(&tmp, target).map_err(|e| io_err(target, e))
+        match fs::hard_link(&tmp, target) {
+            Ok(()) => Ok(true),
+            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
+            Err(e) => Err(io_err(target, e)),
+        }
     })();
-    if result.is_err() {
-        let _ = fs::remove_file(&tmp);
-    }
+    let _ = fs::remove_file(&tmp);
     result
 }
 
-/// Copy `files` (relative paths) from `main` into `wt`. Refusals (a symlink in the target's
-/// parent chain) are returned as items; the caller treats them as failures.
-pub fn execute_copy(main: &Path, wt: &Path, files: &[String]) -> Result<Vec<Item>, BerthError> {
-    let berth_dir = wt.join(".berth");
-    if fs::symlink_metadata(&berth_dir).is_ok_and(|m| m.file_type().is_symlink()) {
-        return Err(BerthError::Env(format!(
-            "{} is a symlink; remove it so berth can stage copies safely",
-            berth_dir.display()
-        )));
+fn safe_relative(rel: &str) -> bool {
+    !rel.is_empty()
+        && !rel.starts_with('/')
+        && rel.split('/').all(|c| !matches!(c, "" | "." | ".."))
+}
+
+/// Copy `files` (relative paths) from `main` into `wt`. Refusals (unsafe path, source changed
+/// since planning, a symlink in the staging or target path) are returned as items; the caller
+/// treats them as failures.
+pub fn execute_copy(
+    main: &Path,
+    wt: &Path,
+    files: &[String],
+    max_bytes: u64,
+) -> Result<Vec<Item>, BerthError> {
+    if symlink_in_parents(wt, ".berth/tmp/x")? {
+        return Ok(files
+            .iter()
+            .map(|f| {
+                item(
+                    f,
+                    Action::Refused,
+                    "staging directory .berth/tmp passes through a symlink",
+                )
+            })
+            .collect());
     }
-    let tmp_dir = berth_dir.join("tmp");
+    let tmp_dir = wt.join(".berth").join("tmp");
     fs::create_dir_all(&tmp_dir).map_err(|e| io_err(&tmp_dir, e))?;
     let mut items = Vec::new();
     for rel in files {
+        if !safe_relative(rel) {
+            items.push(item(rel, Action::Refused, "unsafe path"));
+            continue;
+        }
+        let source = main.join(rel);
+        match fs::symlink_metadata(&source) {
+            Ok(m) if m.file_type().is_symlink() => {
+                items.push(item(rel, Action::Refused, "symlink"));
+                continue;
+            }
+            Ok(m) if !m.is_file() => {
+                items.push(item(rel, Action::Refused, "not a regular file"));
+                continue;
+            }
+            Ok(m) if m.len() > max_bytes => {
+                let reason = format!("larger than [copy].max_bytes ({max_bytes})");
+                items.push(item(rel, Action::Refused, reason));
+                continue;
+            }
+            Ok(_) => {}
+            Err(e) => return Err(io_err(&source, e)),
+        }
         let target = wt.join(rel);
         if symlink_in_parents(wt, rel)? {
             items.push(item(
@@ -184,8 +244,11 @@ pub fn execute_copy(main: &Path, wt: &Path, files: &[String]) -> Result<Vec<Item
             continue;
         }
         vlog(&format!("copy {rel}"));
-        copy_one(&main.join(rel), &target, &tmp_dir)?;
-        items.push(item(rel, Action::Create, "copied"));
+        if copy_one(&source, &target, &tmp_dir)? {
+            items.push(item(rel, Action::Create, "copied"));
+        } else {
+            items.push(item(rel, Action::Skipped, "exists"));
+        }
     }
     Ok(items)
 }

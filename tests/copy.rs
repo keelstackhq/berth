@@ -8,6 +8,8 @@ use common::{Fixture, git as run_git, write};
 use std::fs;
 use std::os::unix::fs::{PermissionsExt, symlink};
 
+const MAX: u64 = 1_048_576;
+
 fn repo(fx: &Fixture) -> Repo {
     git::discover(&fx.repo).unwrap()
 }
@@ -51,7 +53,7 @@ fn copies_ignored_env_byte_for_byte() {
     assert_eq!(p.files, vec![".env".to_string()]);
     assert!(p.refused.is_empty() && p.skipped.is_empty());
     let wt = worktree(&fx);
-    let items = execute_copy(&fx.repo, &wt, &p.files).unwrap();
+    let items = execute_copy(&fx.repo, &wt, &p.files, MAX).unwrap();
     let item = only(&items);
     assert_eq!((item.kind.as_str(), item.key.as_str()), ("copy", ".env"));
     assert_eq!(item.action, Action::Create);
@@ -154,7 +156,7 @@ fn target_symlink_parent_refused() {
     );
     let src = fx.root.path().join("src");
     write(&src, "apps/web/.env.local", "A=1\n");
-    let items = execute_copy(&src, &wt, &["apps/web/.env.local".to_string()]).unwrap();
+    let items = execute_copy(&src, &wt, &["apps/web/.env.local".to_string()], MAX).unwrap();
     let item = only(&items);
     assert_eq!(item.action, Action::Refused);
     assert!(item.reason.contains("passes through a symlink"));
@@ -167,7 +169,7 @@ fn existing_target_skipped() {
     write(&fx.repo, ".env", "NEW=1\n");
     let wt = worktree(&fx);
     write(&wt, ".env", "KEEP=1\n");
-    let items = execute_copy(&fx.repo, &wt, &[".env".to_string()]).unwrap();
+    let items = execute_copy(&fx.repo, &wt, &[".env".to_string()], MAX).unwrap();
     let item = only(&items);
     assert_eq!(item.action, Action::Skipped);
     assert_eq!(item.reason, "exists");
@@ -212,9 +214,98 @@ fn canary_never_appears_in_items() {
     write(&fx.repo, ".dev.vars", &format!("SECRET={canary}\n"));
     let p = plan(&fx, &[".env", ".dev.vars"]);
     let wt = worktree(&fx);
-    let items = execute_copy(&fx.repo, &wt, &p.files).unwrap();
+    let items = execute_copy(&fx.repo, &wt, &p.files, MAX).unwrap();
     let all: Vec<&Item> = p.refused.iter().chain(&p.skipped).chain(&items).collect();
     assert_eq!(all.len(), 2);
     let shown = format!("{all:?}{p:?}");
     assert!(!shown.contains(canary), "{shown}");
+}
+
+#[test]
+fn symlinked_staging_dir_refused() {
+    let fx = Fixture::new();
+    write(&fx.repo, ".env", "SECRET=1\n");
+    let outside = fx.root.path().join("outside");
+    fs::create_dir_all(&outside).unwrap();
+    run_git(&fx.repo, &["checkout", "-q", "-b", "linked"]);
+    fs::create_dir_all(fx.repo.join(".berth")).unwrap();
+    symlink(&outside, fx.repo.join(".berth/tmp")).unwrap();
+    run_git(&fx.repo, &["add", "-f", ".berth/tmp"]);
+    run_git(&fx.repo, &["commit", "-q", "-m", "link"]);
+    run_git(&fx.repo, &["checkout", "-q", "main"]);
+    let wt = fx.root.path().join("wt");
+    run_git(
+        &fx.repo,
+        &["worktree", "add", "-q", wt.to_str().unwrap(), "linked"],
+    );
+    let items = execute_copy(&fx.repo, &wt, &[".env".to_string()], MAX).unwrap();
+    assert_eq!(only(&items).action, Action::Refused);
+    assert_eq!(fs::read_dir(&outside).unwrap().count(), 0);
+    assert!(!wt.join(".env").exists());
+}
+
+#[test]
+fn source_changed_after_plan_refused() {
+    let fx = Fixture::new();
+    ignore(&fx, ".env.local\n");
+    write(&fx.repo, ".env", "A=1\n");
+    write(&fx.repo, ".env.local", "B=1\n");
+    let p = plan_copy(&repo(&fx), &include(&[".env", ".env.local"]), 10).unwrap();
+    assert_eq!(p.files.len(), 2);
+    fs::remove_file(fx.repo.join(".env")).unwrap();
+    symlink("/etc/hostname", fx.repo.join(".env")).unwrap();
+    fs::write(fx.repo.join(".env.local"), vec![b'x'; 50]).unwrap();
+    let wt = worktree(&fx);
+    let items = execute_copy(&fx.repo, &wt, &p.files, 10).unwrap();
+    assert_eq!(items.len(), 2);
+    assert!(
+        items.iter().all(|i| i.action == Action::Refused),
+        "{items:?}"
+    );
+    assert!(!wt.join(".env").exists() && !wt.join(".env.local").exists());
+}
+
+#[test]
+fn unsafe_paths_refused() {
+    let fx = Fixture::new();
+    let wt = worktree(&fx);
+    let outside = fx.root.path().join("escape");
+    let files = vec![
+        "../escape".to_string(),
+        "a/../../escape".to_string(),
+        outside.to_str().unwrap().to_string(),
+    ];
+    write(&fx.repo, "escape", "x");
+    let items = execute_copy(&fx.repo, &wt, &files, MAX).unwrap();
+    assert_eq!(items.len(), 3);
+    assert!(
+        items.iter().all(|i| i.action == Action::Refused),
+        "{items:?}"
+    );
+    assert!(!outside.exists());
+}
+
+#[test]
+fn existing_target_left_alone_and_tmp_clean() {
+    let fx = Fixture::new();
+    write(&fx.repo, ".env", "NEW=1\n");
+    let wt = worktree(&fx);
+    write(&wt, ".env", "KEEP=1\n");
+    execute_copy(&fx.repo, &wt, &[".env".to_string()], MAX).unwrap();
+    assert_eq!(fs::read_to_string(wt.join(".env")).unwrap(), "KEEP=1\n");
+    assert_eq!(fs::read_dir(wt.join(".berth/tmp")).unwrap().count(), 0);
+}
+
+#[test]
+fn non_utf8_path_refused_without_failing_plan() {
+    use std::ffi::OsStr;
+    use std::os::unix::ffi::OsStrExt;
+    let fx = Fixture::new();
+    ignore(&fx, "bad*\n");
+    fs::write(fx.repo.join(OsStr::from_bytes(b"bad\xff")), "x").unwrap();
+    write(&fx.repo, ".env", "A=1\n");
+    let p = plan(&fx, &["bad*", ".env"]);
+    assert_eq!(p.files, vec![".env".to_string()]);
+    let item = only(&p.refused);
+    assert!(item.reason.contains("UTF-8"), "{}", item.reason);
 }
