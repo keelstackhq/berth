@@ -83,14 +83,18 @@ fn entry_item(main: &Path, entry: &Entry, registered: &BTreeSet<PathBuf>) -> Ite
         Ok((ahead, behind)) => format!("ahead {ahead} behind {behind}"),
         Err(_) => "ahead ? behind ?".to_string(),
     };
-    let tree = if !registered.contains(&canon(&entry.path)) {
-        "not a worktree"
-    } else {
-        match git::dirty(&entry.path) {
-            Ok(true) => "dirty",
-            Ok(false) => "clean",
-            Err(_) => "dirty ?",
-        }
+    if !registered.contains(&canon(&entry.path)) {
+        return Item::new(
+            "worktree",
+            task,
+            Action::Drift,
+            format!("unregistered: not a worktree of this repo; run berth down {task}"),
+        );
+    }
+    let tree = match git::dirty(&entry.path) {
+        Ok(true) => "dirty",
+        Ok(false) => "clean",
+        Err(_) => "dirty ?",
     };
     let mut parts = vec![
         state_name(entry.state).to_string(),

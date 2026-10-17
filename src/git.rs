@@ -54,6 +54,8 @@ fn exec(dir: &Path, args: &[&OsStr], stdin: Option<Vec<u8>>) -> Result<Output, B
         .arg(dir)
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")
+        // Read-only commands (`status`) must not take index.lock or rewrite an agent's index.
+        .env("GIT_OPTIONAL_LOCKS", "0")
         .stdin(if stdin.is_some() {
             Stdio::piped()
         } else {

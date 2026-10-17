@@ -413,3 +413,25 @@ fn delete_branch_removes_a_user_named_merged_branch() {
     assert_eq!(find(&json(&out), "branch").unwrap()["action"], "remove");
     assert!(!branch_exists(&fx.repo, "feature/mine"));
 }
+
+#[test]
+fn failing_recheck_says_what_already_happened() {
+    // The hook deletes the base ref after step 4 resolved it, so the step-7 re-check errors.
+    let fx = Fixture::new();
+    git(&fx.repo, &["branch", "tmpbase"]);
+    fx.config(
+        &fx.repo,
+        "",
+        "[worktree]\nbase = \"tmpbase\"\n[teardown]\nrun = [\"git branch -D tmpbase\"]",
+    );
+    assert_eq!(code(&up(&fx, &["a"])), 0);
+    let out = down(&fx, &["a", "--delete-branch"]);
+    assert_eq!(code(&out), 3, "{}", stderr(&out));
+    let err = stderr(&out);
+    assert!(
+        err.contains("worktree and ports were already removed") && err.contains("kept"),
+        "{err}"
+    );
+    assert!(branch_exists(&fx.repo, "berth/a"));
+    assert!(!wt(&fx, "a").exists());
+}

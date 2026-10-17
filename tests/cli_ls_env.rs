@@ -303,3 +303,60 @@ fn env_does_not_include_copied_values() {
     let out = berth(&fx, &["ls", "--json"]);
     assert!(!stdout(&out).contains(CANARY));
 }
+
+#[test]
+fn ls_leaves_the_worktree_index_alone() {
+    let fx = Fixture::new();
+    fx.config(&fx.repo, "", "");
+    up(&fx, "a");
+    let path = wt(&fx, "a");
+    write(&path, "t.txt", "tracked");
+    git(&path, &["add", "t.txt"]);
+    git(&path, &["commit", "-q", "-m", "t"]);
+    // Newer mtime, same content: a plain `git status` would refresh and rewrite the index.
+    std::thread::sleep(Duration::from_millis(1100));
+    write(&path, "t.txt", "tracked");
+    write(&path, "u.txt", "untracked");
+    let index = PathBuf::from(
+        git(
+            &path,
+            &["rev-parse", "--path-format=absolute", "--git-path", "index"],
+        )
+        .trim(),
+    );
+    let lock = PathBuf::from(format!("{}.lock", index.display()));
+    let before = (
+        fs::read(&index).unwrap(),
+        fs::metadata(&index).unwrap().modified().unwrap(),
+    );
+    let out = berth(&fx, &["ls"]);
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    assert!(stdout(&out).contains("dirty"), "{}", stdout(&out));
+    let after = (
+        fs::read(&index).unwrap(),
+        fs::metadata(&index).unwrap().modified().unwrap(),
+    );
+    assert!(before == after, "ls rewrote the index");
+    assert!(!lock.exists());
+}
+
+#[test]
+fn ls_unregistered_directory_is_drift() {
+    let fx = Fixture::new();
+    fx.config(&fx.repo, "", "");
+    up(&fx, "a");
+    let path = wt(&fx, "a");
+    git(
+        &fx.repo,
+        &["worktree", "remove", "--force", path.to_str().unwrap()],
+    );
+    fs::create_dir_all(&path).unwrap();
+    let out = berth(&fx, &["ls", "--json"]);
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    let a = item(&json(&out), "a").clone();
+    assert_eq!(a["action"], "drift");
+    assert_eq!(
+        a["reason"],
+        "unregistered: not a worktree of this repo; run berth down a"
+    );
+}

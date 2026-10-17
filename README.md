@@ -7,5 +7,6 @@ hook, and `berth down <task>` cleans up. One static Rust binary, part of the kee
 --release` (Rust 1.97); the binary is `target/release/berth`. Design:
 `docs/superpowers/specs/2026-10-17-berth-design.md`.
 
-`berth down` keeps the branch (add `--delete-branch` to drop it once merged into `[worktree].base`;
-this also deletes a branch you named with `--branch` when it is merged) and leaves the lines `berth up` added to `.git/info/exclude`; they are harmless.
+`berth down` keeps the branch (add `--delete-branch` to drop it once merged into
+`[worktree].base`; this also deletes a branch you named with `--branch` when it is merged) and
+leaves the lines `berth up` added to `.git/info/exclude`; they are harmless.
