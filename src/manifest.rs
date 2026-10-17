@@ -95,7 +95,9 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), BerthError> {
         let mut file = std::fs::File::create(&tmp)?;
         file.write_all(bytes)?;
         file.sync_all()?;
-        std::fs::rename(&tmp, path)
+        std::fs::rename(&tmp, path)?;
+        // Persist the rename itself.
+        std::fs::File::open(dir)?.sync_all()
     })();
     if let Err(source) = result {
         let _ = std::fs::remove_file(&tmp);
@@ -126,10 +128,21 @@ impl Manifest {
             }
             Err(source) => return Err(BerthError::Io { path, source }),
         };
-        serde_json::from_slice(&bytes).map_err(|e| BerthError::Config {
-            file: path,
-            message: format!("invalid manifest: {e}; fix or delete the file"),
-        })
+        let manifest: Manifest =
+            serde_json::from_slice(&bytes).map_err(|e| BerthError::Config {
+                file: path.clone(),
+                message: format!("invalid manifest: {e}; fix or delete the file"),
+            })?;
+        if manifest.version != 1 {
+            return Err(BerthError::Config {
+                file: path,
+                message: format!(
+                    "unsupported manifest version {}; this berth reads version 1, upgrade berth",
+                    manifest.version
+                ),
+            });
+        }
+        Ok(manifest)
     }
 
     pub fn save(&self, main: &Path) -> Result<(), BerthError> {

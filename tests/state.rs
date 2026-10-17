@@ -181,13 +181,77 @@ fn pid_alive_dead_and_live() {
 
 #[test]
 fn kill_group_kills_group() {
+    use std::io::{BufRead, BufReader};
+    use std::process::Stdio;
     let mut child = Command::new("sh")
-        .args(["-c", "sleep 30 & wait"])
+        .args(["-c", "sleep 30 & echo $!; wait"])
+        .stdout(Stdio::piped())
         .process_group(0)
         .spawn()
         .unwrap();
+    let mut line = String::new();
+    BufReader::new(child.stdout.take().unwrap())
+        .read_line(&mut line)
+        .unwrap();
+    let sleep_pid: u32 = line.trim().parse().unwrap();
+    let host = berth::sys::hostname();
+    assert!(pid_alive(sleep_pid, &host));
     kill_group(child.id());
     let start = Instant::now();
     child.wait().unwrap();
     assert!(start.elapsed() < Duration::from_secs(2));
+    // The orphaned sleep is reaped by init; give it a moment.
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while pid_alive(sleep_pid, &host) && Instant::now() < deadline {
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    assert!(
+        !pid_alive(sleep_pid, &host),
+        "sleep child survived kill_group"
+    );
+}
+
+#[test]
+fn unknown_version_is_config_error() {
+    let dir = tempfile::tempdir().unwrap();
+    let main = dir.path();
+    write_atomic(
+        &manifest_path(main),
+        br#"{"version": 2, "repo": "/r", "worktrees": []}"#,
+    )
+    .unwrap();
+    match Manifest::load(main) {
+        Err(BerthError::Config { file, message }) => {
+            assert_eq!(file, manifest_path(main));
+            assert!(message.contains("version"), "{message}");
+        }
+        other => panic!("expected Config, got {other:?}"),
+    }
+    write_atomic(
+        &dir.path().join("ports.json"),
+        br#"{"version": 9, "blocks": []}"#,
+    )
+    .unwrap();
+    match Registry::load(dir.path()) {
+        Err(BerthError::Config { file, .. }) => assert_eq!(file, dir.path().join("ports.json")),
+        other => panic!("expected Config, got {other:?}"),
+    }
+}
+
+#[test]
+fn relative_state_paths() {
+    let xdg_rel = |k: &str| match k {
+        "XDG_STATE_HOME" => Some("rel".to_string()),
+        "HOME" => Some("/h".to_string()),
+        _ => None,
+    };
+    assert_eq!(
+        state_dir_from(xdg_rel).unwrap(),
+        Path::new("/h/.local/state/berth")
+    );
+    let berth_rel = |k: &str| (k == "BERTH_STATE_DIR").then(|| "rel/dir".to_string());
+    match state_dir_from(berth_rel) {
+        Err(BerthError::Config { message, .. }) => assert!(message.contains("absolute")),
+        other => panic!("expected Config, got {other:?}"),
+    }
 }

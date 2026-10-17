@@ -30,9 +30,20 @@ pub fn state_dir() -> Result<PathBuf, BerthError> {
 pub fn state_dir_from(get: impl Fn(&str) -> Option<String>) -> Result<PathBuf, BerthError> {
     let set = |key: &str| get(key).filter(|v| !v.is_empty());
     if let Some(dir) = set("BERTH_STATE_DIR") {
-        return Ok(PathBuf::from(dir));
+        let dir = PathBuf::from(dir);
+        if !dir.is_absolute() {
+            return Err(BerthError::Config {
+                file: PathBuf::from("BERTH_STATE_DIR"),
+                message: format!(
+                    "{} is not an absolute path; set BERTH_STATE_DIR to an absolute path",
+                    dir.display()
+                ),
+            });
+        }
+        return Ok(dir);
     }
-    if let Some(xdg) = set("XDG_STATE_HOME") {
+    // The XDG spec says a relative XDG_STATE_HOME must be ignored.
+    if let Some(xdg) = set("XDG_STATE_HOME").filter(|v| Path::new(v).is_absolute()) {
         return Ok(PathBuf::from(xdg).join("berth"));
     }
     if let Some(home) = set("HOME") {
@@ -61,10 +72,20 @@ impl Registry {
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Ok(Registry::empty()),
             Err(source) => return Err(BerthError::Io { path, source }),
         };
-        serde_json::from_slice(&bytes).map_err(|e| BerthError::Config {
-            file: path,
+        let reg: Registry = serde_json::from_slice(&bytes).map_err(|e| BerthError::Config {
+            file: path.clone(),
             message: format!("invalid ports registry: {e}; fix or delete the file"),
-        })
+        })?;
+        if reg.version != 1 {
+            return Err(BerthError::Config {
+                file: path,
+                message: format!(
+                    "unsupported registry version {}; this berth reads version 1, upgrade berth",
+                    reg.version
+                ),
+            });
+        }
+        Ok(reg)
     }
 
     pub fn save(&self, state: &Path) -> Result<(), BerthError> {
