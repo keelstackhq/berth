@@ -19,6 +19,7 @@ Milestone 1, plan `docs/superpowers/plans/2026-10-17-berth-m1.md`: Tasks 1-10 do
 - 2026-10-17 · Task 11 · `berth down`: refusals (live creator, dirty, unmerged `--delete-branch`), teardown, only registered worktrees removed, orphan blocks freed (`src/ops/down.rs`); `up` rollback removes the root dir only if berth made it, `--keep-on-failure` copy refusal records setup `skipped`; spec §11 amended · `cargo test --test cli_down` 10/10, `cli_up` 33/33
 - 2026-10-17 · Task 12 · `berth ls` (lock-free; ahead/behind, dirty, listening ports, missing/interrupted/unmanaged drift) and `berth env` (task or cwd; `--json` vs `--format`); `down` re-checks merge state before `branch -D`, says "pass --force" when worktree remove fails, reuses up's `unreserve`; spec §9/§11 amended · `cargo test --test cli_ls_env` 12/12, `cli_down` 13/13
 - 2026-10-17 · Task 13 · `berth doctor` (lock-free, writes no file; git, config, copy, root, registry, manifest, exclude, port, owner items; exit 1 on drift); spec §11 amended · `cargo test --test cli_doctor` 11/11
+- 2026-10-17 · Task 14 · concurrency (8 ups/1 repo, 4+4 ups/2 repos, killed up recovers, lock timeout names holder) and secret canaries; doctor treats a live `creating` owner as in progress · concurrency x5 4/4 each, secrets 1/1, cli_doctor 12/12
 
 ## Blocked
 

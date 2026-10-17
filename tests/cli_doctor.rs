@@ -149,13 +149,14 @@ fn doctor_writes_nothing() {
         other.display()
     );
     write(&fx.state, "ports.json", &reg);
+    up(&fx, "a");
     let git_a = fx.repo.join(".git");
     let git_b = other.join(".git");
     let before = snapshot(&[&git_a, &git_b, &fx.state, &fx.repo]);
     let (_, v) = doctor(&fx);
     assert_eq!(snapshot(&[&git_a, &git_b, &fx.state, &fx.repo]), before);
     assert!(!git_b.join("berth.lock").exists());
-    assert!(!git_a.join("berth.lock").exists());
+    // `up` made repo A's lock; the snapshot above proves doctor did not touch it.
     assert_drift(&v, "registry");
 }
 
@@ -239,4 +240,34 @@ fn port_of_missing_worktree_is_drift() {
     let (code, v) = doctor(&fx);
     assert_eq!(code, 1, "{v}");
     assert_drift(&v, "port");
+}
+
+/// Mark task `a` as `creating`, owned by this (live) test process.
+fn mark_creating_live(fx: &Fixture) {
+    let path = fx.repo.join(".agents/worktrees.json");
+    let mut m: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    m["worktrees"][0]["state"] = "creating".into();
+    m["worktrees"][0]["owner"]["pid"] = std::process::id().into();
+    fs::write(&path, serde_json::to_vec_pretty(&m).unwrap()).unwrap();
+}
+
+#[test]
+fn live_creating_entry_is_in_progress_not_drift() {
+    let fx = Fixture::new();
+    fx.config(&fx.repo, "", "");
+    up(&fx, "a");
+    let out = berth(&fx, &["env", "a", "--json"]);
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let port: u16 = v["worktrees"][0]["env"]["PORT"]
+        .as_str()
+        .unwrap()
+        .parse()
+        .unwrap();
+    mark_creating_live(&fx);
+    fs::remove_dir_all(wt(&fx, "a")).unwrap();
+    let _listener = TcpListener::bind(("127.0.0.1", port)).expect("hold the port");
+    let (code, v) = doctor(&fx);
+    assert_eq!(code, 0, "{v}");
+    let manifest = items(&v, "manifest");
+    assert!(manifest.iter().any(|i| i["reason"] == "creating"), "{v}");
 }

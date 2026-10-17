@@ -16,6 +16,11 @@ use crate::{BerthError, Ctx, config, git, sys};
 /// What `up` keeps out of git, checked as paths below the entry (a directory pattern matches).
 const EXCLUDED: [&str; 2] = [".agents/worktrees.json", ".berth/x"];
 
+/// A `creating` entry whose owner is alive on this host is an `up` in progress, not drift.
+fn in_progress(e: &crate::manifest::Entry) -> bool {
+    e.state == State::Creating && sys::pid_alive(e.owner.pid, &e.owner.host)
+}
+
 fn canon(path: &Path) -> PathBuf {
     std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
@@ -135,8 +140,10 @@ fn manifest_items(manifest: &Manifest, main: &Path, root: &Path) -> Result<Vec<I
     let mut out = Vec::new();
     for e in &manifest.worktrees {
         let task = e.task.as_str();
-        let creating = e.state == State::Creating && sys::pid_alive(e.owner.pid, &e.owner.host);
-        if !e.path.exists() {
+        let creating = in_progress(e);
+        if creating && !e.path.exists() {
+            out.push(Item::new("manifest", task, Action::Ok, "creating"));
+        } else if !e.path.exists() {
             out.push(Item::new(
                 "manifest",
                 task,
@@ -222,7 +229,10 @@ fn port_items(manifest: &Manifest) -> Vec<Item> {
                 .collect();
             let task = e.task.as_str();
             let shown: Vec<String> = listening.iter().map(u16::to_string).collect();
-            if !listening.is_empty() && (e.state != State::Ready || !e.path.exists()) {
+            if !listening.is_empty()
+                && !in_progress(e)
+                && (e.state != State::Ready || !e.path.exists())
+            {
                 Item::new(
                     "port",
                     task,
