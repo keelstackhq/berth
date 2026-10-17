@@ -5,7 +5,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use crate::error::BerthError;
-use crate::manifest::write_atomic;
+use crate::manifest::{Manifest, write_atomic};
+use crate::{git, lock};
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Block {
@@ -116,4 +117,27 @@ impl Registry {
         self.blocks.retain(|b| !f(b));
         before - self.blocks.len()
     }
+}
+
+/// Whether a block of another repo can be reclaimed. Read-only: never blocks, never creates a
+/// file. A missing repo path is stale; a repo that cannot be read (not a repo any more, an
+/// unreadable or invalid manifest) is not; a task still in its manifest is not; otherwise the
+/// block is stale only when that repo's lock is free (an `up` there may be between ports and
+/// manifest).
+pub fn is_stale(b: &Block) -> bool {
+    match std::fs::symlink_metadata(&b.repo) {
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return true,
+        Err(_) => return false,
+        Ok(_) => {}
+    }
+    let Ok(repo) = git::discover(&b.repo) else {
+        return false;
+    };
+    let Ok(manifest) = Manifest::load(&repo.main) else {
+        return false;
+    };
+    if manifest.find(&b.task).is_some() {
+        return false;
+    }
+    !lock::is_held(&lock::repo_lock(&repo.common_dir))
 }

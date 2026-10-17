@@ -63,10 +63,12 @@ Global flags: `-C <dir>`, `--json`, `--no-color`, `-v`. `<task>` is a slug
 ### Exit codes
 
 `0` ok · `1` refused or drift (dirty worktree on `down`, task exists with different settings, a
-copy-listed file git does not ignore, worktree limit reached, `doctor` found drift) · `2` usage
-(bad flags or arguments, invalid task slug; clap usage errors exit 2) · `3` config or environment
-error (unknown `berth.toml` key, git missing or too old, no free port block, lock timeout, setup
-hook failed); the message says how to fix it.
+copy-listed file git does not ignore, worktree limit reached, task being created by a live `up`:
+"task is being created by pid N", `doctor` found drift) · `2` usage (bad flags or arguments,
+invalid task slug, invalid `--branch`; clap usage errors exit 2) · `3` config or environment
+error (unknown `berth.toml` key, git missing or too old, unknown or `-`-prefixed `--base`: "unknown
+--base ref `<x>`; berth never fetches, run `git fetch` first", no free port block, lock timeout,
+setup hook failed); the message says how to fix it.
 
 Justification: berth follows splice's scheme (0 ok · 1 refused/drift · 2 usage · 3 config or
 environment) because berth has no human steps, which is what hoist's `2` means. Agents only need
@@ -184,15 +186,23 @@ never exported: they stay in `.env`, read by the app's own loader.
    is the first entry of `git worktree list --porcelain -z`. For a `--separate-git-dir` repo git
    lists the git dir itself first; then main is `git rev-parse --show-toplevel` run from the main
    checkout, and from a linked worktree of such a repo berth fails closed (exit 3, "run berth from
-   the main checkout"). The common dir is `git rev-parse --git-common-dir`.
-2. Take the repo lock `<git-common-dir>/berth.lock`; then the user lock `<state>/ports.lock`.
-   Lock order is always repo → user, so two repos and two tasks cannot deadlock.
-3. Check: task not present (else §3 idempotency), `max` not reached, every `[copy]` match is
+   the main checkout"). The common dir is `git rev-parse --git-common-dir`. The branch name is
+   checked (`git check-ref-format --branch`, exit 2) and the base resolved (exit 3) here, before
+   any lock, port or file.
+2. Take the repo lock `<git-common-dir>/berth.lock`. The user lock `<state>/ports.lock` is taken
+   in step 4 only. Lock order is always repo → user, so two repos and two tasks cannot deadlock.
+3. Check: task not present (else §3 idempotency; a `creating` entry whose owner is alive → exit 1
+   "task is being created by pid N"), path free, `max` not reached, every `[copy]` match is
    ignored by git (`git check-ignore`) — a copy-listed file git would track is refused (exit 1:
-   "add it to .gitignore"), because the agent would commit the secret.
-4. Allocate ports (§9) and write `ports.json`; release the user lock.
-5. `git worktree add -b <branch> <path> <base>` (or check out an existing `--branch`); write the
-   manifest entry with `state: creating`. Release the repo lock.
+   "add it to .gitignore"), because the agent would commit the secret. Nothing is created on
+   any of these paths.
+4. Under the user lock: allocate ports (§9) and write `ports.json`; release the user lock.
+5. Still under the repo lock, in this order: add `/.berth/`, `/.agents/.*.tmp.*` and (unless git
+   already ignores it) `/.agents/worktrees.json` to `<git-common-dir>/info/exclude`; write the
+   manifest entry with `state: creating` and its owner; then `git worktree add -b <branch> <path>
+   <base>`, or check out the branch if it exists. An existing branch records `base =
+   merge-base(branch, resolved base)`, and a given `--base` is reported `skipped` with a warning
+   on stderr. A failure in this step frees the ports and drops the entry. Release the repo lock.
 6. Copy files (§10). Create `<wt>/.berth/tmp` (`/.berth/` is added to `.git/info/exclude`).
 7. Run `[setup].run` in the worktree with the §7 env, output → stderr, with the timeout
    (`--no-setup` skips it).
@@ -221,8 +231,14 @@ and `doctor` as `drift: interrupted`; `down` cleans it.
   which keeps bookmarks and OAuth callback URLs working.
 - A block is free when no registry entry overlaps it **and** every port binds on `127.0.0.1` and,
   if IPv6 is available, `[::1]` (bind, then drop at once). This catches non-berth processes.
-- Registry entries whose repo path no longer exists, or whose task is not in that repo's manifest,
-  are stale: `doctor` reports them; `up` reclaims them only after the bind probe passes.
+- A registry entry of another repo is stale when its repo path no longer exists, or when its task
+  is not in that repo's manifest **and** that repo's lock is not held (an `up` there may be
+  between writing ports and writing the manifest). The check is read-only and never blocks: an
+  unreadable or invalid foreign manifest, or a path that is no longer a repo, is not stale.
+  `doctor` reports stale entries. `up` treats them as free, and after the bind probe passes
+  removes only the stale entries that overlap the block it chose; stale entries elsewhere stay.
+- Entries of the repo running `up` whose task has no manifest entry are dropped under its repo
+  lock (provably stale: they are left by a crash between steps 4 and 5).
 - The probe is advisory: a process may take a port later; `ls`/`doctor` re-probe and report
   `drift: port 21341 in use`, killing nothing.
 - No free block → exit 3 with "widen [ports].range or `berth down` unused tasks".

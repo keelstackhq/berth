@@ -42,6 +42,8 @@ pub fn vlog(msg: &str) {
 /// What every command needs: where it runs and how it reports.
 pub struct Ctx {
     pub dir: PathBuf,
+    /// The repository discovered from `dir` (main checkout, common dir, name).
+    pub repo: git::Repo,
     pub verbose: bool,
     pub json: bool,
 }
@@ -54,11 +56,15 @@ pub fn run(cli: Cli) -> Result<Report, BerthError> {
             source,
         })?,
     };
-    let _repo = git::discover(&dir)?;
-    let _ctx = Ctx {
+    let repo = git::discover(&dir)?;
+    let ctx = Ctx {
         dir,
+        repo,
         verbose: cli.verbose,
         json: cli.json,
     };
-    Ok(Report::new(cli.command.name()))
+    match &cli.command {
+        cli::Command::Up(args) => ops::up::up(&ctx, args),
+        other => Ok(Report::new(other.name())),
+    }
 }

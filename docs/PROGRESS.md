@@ -2,7 +2,7 @@
 
 ## Status
 
-Milestone 1, plan `docs/superpowers/plans/2026-10-17-berth-m1.md`: Tasks 1-7 done.
+Milestone 1, plan `docs/superpowers/plans/2026-10-17-berth-m1.md`: Tasks 1-10 done.
 
 ## Done
 
@@ -15,6 +15,7 @@ Milestone 1, plan `docs/superpowers/plans/2026-10-17-berth-m1.md`: Tasks 1-7 don
 - 2026-10-17 · Task 7 · git CLI wrapper, version check, `run` discovers the repo first (`src/git.rs`); ports prober flake fixed · `cargo test --test git` 16/16, full suite 3 runs green
 - 2026-10-17 · Task 8 · copy allow-list: gitignored-only, symlink/size/tracked refusals, temp+rename into worktree (`src/copy.rs`); spec §4, §15 amended · `cargo test --test copy` 10/10
 - 2026-10-17 · Task 9 · setup/teardown hook runner: own process group, group kill on timeout/failure, bounded reader grace, non-UTF-8 safe (`src/hooks.rs`); spec §8 amended · `cargo test --test hooks` 8/8
+- 2026-10-17 · Task 10 · `berth up`: input checks before any lock, drift/refusal paths, ports with stale reclaim (`registry::is_stale`, read-only), info/exclude lines, `creating` entry before `worktree add`, copy, setup, rollback or `--keep-on-failure` (`src/ops/up.rs`); spec §3, §8, §9 amended · `cargo test --test cli_up` 28/28, 3 runs green
 
 ## Blocked
 
