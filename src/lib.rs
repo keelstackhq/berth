@@ -7,6 +7,7 @@ pub mod error;
 pub mod lock;
 pub mod manifest;
 pub mod ops;
+pub mod ports;
 pub mod registry;
 pub mod report;
 pub mod sys;
