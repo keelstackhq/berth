@@ -31,20 +31,23 @@ fn canary_never_printed() {
     common::git(&fx.repo, &["commit", "-q", "-m", "ignore vars"]);
 
     let mut seen = Vec::new();
-    let scan_files = |when: &str| {
+    let scan_files = |when: &str, must_exist: bool| {
         for file in [
             fx.repo.join(".agents/worktrees.json"),
             fx.state.join("ports.json"),
         ] {
             let text = fs::read_to_string(&file).unwrap_or_default();
-            assert!(!text.is_empty(), "{file:?} is empty {when}");
+            if must_exist {
+                assert!(!text.is_empty(), "{file:?} is empty {when}");
+            }
             for canary in [ENV_CANARY, VARS_CANARY] {
                 assert!(!text.contains(canary), "canary in {file:?} {when}");
             }
         }
     };
-    // The first (plain) run of each command must succeed. Repeats (--json, -v, a second `up`,
-    // `down` after the entry is gone) may legitimately exit 1 or 3, never 2 (usage).
+    // Every plain run (no --json, no -v) must exit 0; a second plain `up` of a ready task is
+    // idempotent. The --json / -v repeats (e.g. `down` after the entry is gone) may exit 1 or 3,
+    // never 2 (usage).
     let mut ok = |args: &[&str]| {
         for json in [false, true] {
             for verbose in [false, true] {
@@ -66,16 +69,17 @@ fn canary_never_printed() {
         }
     };
     ok(&["up", "a"]);
-    scan_files("after up");
+    scan_files("after up", true);
     ok(&["up", "a"]);
     ok(&["ls"]);
     for format in ["sh", "fish", "dotenv", "json"] {
         ok(&["env", "a", "--format", format]);
     }
-    scan_files("after env");
+    scan_files("after env", true);
     ok(&["doctor"]);
-    scan_files("before down");
+    scan_files("before down", true);
     ok(&["down", "a"]);
+    scan_files("at end", false);
 
     for (args, text) in &seen {
         for canary in [ENV_CANARY, VARS_CANARY] {
