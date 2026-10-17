@@ -65,6 +65,7 @@ pub fn run(cli: Cli) -> Result<Report, BerthError> {
     };
     match &cli.command {
         cli::Command::Up(args) => ops::up::up(&ctx, args),
+        cli::Command::Down(args) => ops::down::down(&ctx, args),
         other => Ok(Report::new(other.name())),
     }
 }

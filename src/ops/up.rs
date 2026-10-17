@@ -42,11 +42,11 @@ fn normalize(path: &Path) -> PathBuf {
     out
 }
 
-fn repo_lock(repo: &Repo) -> Result<LockGuard, BerthError> {
+pub(super) fn repo_lock(repo: &Repo) -> Result<LockGuard, BerthError> {
     lock::acquire(&lock::repo_lock(&repo.common_dir), lock::lock_timeout())
 }
 
-fn user_lock(state: &Path) -> Result<LockGuard, BerthError> {
+pub(super) fn user_lock(state: &Path) -> Result<LockGuard, BerthError> {
     lock::acquire(&lock::user_lock(state), lock::lock_timeout())
 }
 
@@ -66,7 +66,7 @@ fn hint(path: &Path) -> String {
     )
 }
 
-fn ports_item(block: &PortBlock, action: Action) -> Item {
+pub(super) fn ports_item(block: &PortBlock, action: Action) -> Item {
     let named: Vec<String> = block
         .named
         .iter()
@@ -157,7 +157,12 @@ pub fn up(ctx: &Ctx, args: &UpArgs) -> Result<Report, BerthError> {
         &base_sha,
         block,
     );
-    let (entry, branch_existed, mut items) = match created {
+    let Created {
+        entry,
+        branch_existed,
+        root_created,
+        mut items,
+    } = match created {
         Ok(created) => created,
         Err(err) => {
             cleanup("release ports", unreserve(&state, main, task));
@@ -177,6 +182,7 @@ pub fn up(ctx: &Ctx, args: &UpArgs) -> Result<Report, BerthError> {
         branch: &branch,
         base_sha: &base_sha,
         branch_existed,
+        root_created,
         env: &entry.env,
     };
 
@@ -184,7 +190,7 @@ pub fn up(ctx: &Ctx, args: &UpArgs) -> Result<Report, BerthError> {
     let copy_items = match copy::execute_copy(main, &path, &plan.files, cfg.max_bytes()) {
         Ok(items) => items,
         Err(err) => {
-            job.fail(args.keep_on_failure, &[], 0.0);
+            job.fail(args.keep_on_failure, &[], setup_status("skipped", 0.0));
             return Err(err);
         }
     };
@@ -194,7 +200,8 @@ pub fn up(ctx: &Ctx, args: &UpArgs) -> Result<Report, BerthError> {
         .map(|i| i.key.clone())
         .collect();
     if copy_items.iter().any(|i| i.action == Action::Refused) {
-        job.fail(args.keep_on_failure, &copied, 0.0);
+        // Setup never ran.
+        job.fail(args.keep_on_failure, &copied, setup_status("skipped", 0.0));
         let mut report = Report::new("up");
         report.items = copy_items;
         report.exit_code = 1;
@@ -220,7 +227,7 @@ pub fn up(ctx: &Ctx, args: &UpArgs) -> Result<Report, BerthError> {
                 job.fail(
                     args.keep_on_failure,
                     &copied,
-                    started.elapsed().as_secs_f64(),
+                    setup_status("failed", started.elapsed().as_secs_f64()),
                 );
                 return Err(err);
             }
@@ -415,8 +422,23 @@ fn reserve_ports(
     Ok(start)
 }
 
-/// Step 5 under the repo lock. Returns the `creating` entry, whether the branch existed, and
-/// the items: the branch item first, then any `exclude` items.
+fn setup_status(status: &str, secs: f64) -> SetupStatus {
+    SetupStatus {
+        status: status.into(),
+        secs,
+    }
+}
+
+/// What step 5 created: the `creating` entry, whether the branch existed, whether berth made
+/// the worktree root directory, and the items (the branch item first, then any `exclude` items).
+struct Created {
+    entry: Entry,
+    branch_existed: bool,
+    root_created: bool,
+    items: Vec<Item>,
+}
+
+/// Step 5 under the repo lock.
 #[allow(clippy::too_many_arguments)]
 fn create_worktree(
     repo: &Repo,
@@ -427,7 +449,7 @@ fn create_worktree(
     branch: &str,
     base_sha: &str,
     ports: PortBlock,
-) -> Result<(Entry, bool, Vec<Item>), BerthError> {
+) -> Result<Created, BerthError> {
     let main = &repo.main;
     let task = args.task.as_str();
     let mut excludes = Vec::new();
@@ -496,10 +518,22 @@ fn create_worktree(
     manifest.upsert(entry.clone());
     manifest.save(main)?;
     let new_from = if existed { None } else { Some(base_sha) };
-    git::worktree_add(main, path, branch, new_from)?;
+    // Recorded before `worktree add` creates it: only a root berth made is berth's to remove.
+    let root_created = path.parent().is_some_and(|root| !root.exists());
+    if let Err(err) = git::worktree_add(main, path, branch, new_from) {
+        if root_created && let Some(root) = path.parent() {
+            let _ = std::fs::remove_dir(root);
+        }
+        return Err(err);
+    }
     let mut items = vec![branch_item];
     items.append(&mut excludes);
-    Ok((entry, existed, items))
+    Ok(Created {
+        entry,
+        branch_existed: existed,
+        root_created,
+        items,
+    })
 }
 
 /// Report a failed cleanup step on stderr; the original error is what the caller returns.
@@ -538,31 +572,29 @@ struct Job<'a> {
     branch: &'a str,
     base_sha: &'a str,
     branch_existed: bool,
+    root_created: bool,
     env: &'a BTreeMap<String, String>,
 }
 
 impl Job<'_> {
     /// Roll back, or with `--keep-on-failure` mark the entry `failed` and keep everything.
     /// Cleanup errors are reported on stderr; the caller returns the original failure.
-    fn fail(&self, keep: bool, copied: &[String], secs: f64) {
+    fn fail(&self, keep: bool, copied: &[String], setup: SetupStatus) {
         if keep {
-            cleanup("mark the entry failed", self.mark_failed(copied, secs));
+            cleanup("mark the entry failed", self.mark_failed(copied, setup));
         } else {
             self.rollback();
         }
     }
 
-    fn mark_failed(&self, copied: &[String], secs: f64) -> Result<(), BerthError> {
+    fn mark_failed(&self, copied: &[String], setup: SetupStatus) -> Result<(), BerthError> {
         let main = &self.repo.main;
         let _guard = repo_lock(self.repo)?;
         let mut manifest = Manifest::load(main)?;
         if let Some(entry) = manifest.worktrees.iter_mut().find(|e| e.task == self.task) {
             entry.state = State::Failed;
             entry.copied = copied.to_vec();
-            entry.setup = SetupStatus {
-                status: "failed".into(),
-                secs,
-            };
+            entry.setup = setup;
         }
         manifest.save(main)
     }
@@ -591,7 +623,9 @@ impl Job<'_> {
         {
             cleanup("delete the branch", git::delete_branch(main, self.branch));
         }
-        if let Some(root) = self.path.parent() {
+        if self.root_created
+            && let Some(root) = self.path.parent()
+        {
             // Only succeeds when empty.
             let _ = std::fs::remove_dir(root);
         }

@@ -263,6 +263,11 @@ are gitignored by rule (§8.3), so they never block. Commits are safe because th
 `--delete-branch` deletes it only if it is merged into `base` (else refused, exit 1). Then
 teardown hook, `git worktree remove` (`--force` passed through only with berth's `--force`),
 `git worktree prune`, release ports, drop the manifest entry.
+`down` refuses (exit 1) while a live process is still creating the task, and `--delete-branch`
+resolves `[worktree].base` at that moment. It only inspects, runs hooks in and removes a path that
+`git worktree list` reports as a linked worktree; any other directory is left in place (item
+`skipped`). A task without an entry just frees any orphaned port block. Lines `up` added to
+`info/exclude` stay.
 
 **ls**: one row per manifest entry plus unmanaged worktrees under `[worktree].root`
 (`drift: unmanaged`): task, state, branch, ahead/behind, dirty, ports listening, path. Exit 0

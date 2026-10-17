@@ -1,7 +1,6 @@
 mod common;
 
 use berth::lock::{acquire, repo_lock, user_lock};
-use berth::manifest::Manifest;
 use berth::ports::{blocks, preferred_index};
 use berth::registry::{Block, Registry, is_stale};
 use common::{Fixture, git, write};
@@ -160,24 +159,9 @@ fn seed_block(fx: &Fixture, repo: &Path, task: &str, start: u16) {
     reg.save(&fx.state).unwrap();
 }
 
-/// What `berth down` does, by hand (Task 11 implements `down`; switch to it there).
-fn down_by_hand(fx: &Fixture, task: &str) {
-    let main = canon(&fx.repo);
-    git(
-        &fx.repo,
-        &[
-            "worktree",
-            "remove",
-            "--force",
-            wt(fx, task).to_str().unwrap(),
-        ],
-    );
-    let mut m = Manifest::load(&main).unwrap();
-    m.remove(task);
-    m.save(&main).unwrap();
-    let mut reg = Registry::load(&fx.state).unwrap();
-    reg.release(&main, task);
-    reg.save(&fx.state).unwrap();
+fn down(fx: &Fixture, task: &str) {
+    let out = fx.berth().args(["down", task]).output().expect("run berth");
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
 }
 
 fn regex_escape(s: &str) -> String {
@@ -360,7 +344,7 @@ fn up_after_down_reuses_branch() {
     git(&path, &["add", "work.txt"]);
     git(&path, &["commit", "-q", "-m", "work"]);
     let head = git(&path, &["rev-parse", "HEAD"]).trim().to_string();
-    down_by_hand(&fx, "a");
+    down(&fx, "a");
     assert!(!path.exists());
     let out = up(&fx, &["a", "--json"]);
     assert_eq!(code(&out), 0, "{}", stderr(&out));
@@ -559,7 +543,7 @@ fn crash_after_ports_leaks_nothing() {
     let bs = reg_blocks(&fx);
     assert_eq!(bs.len(), 1, "{bs:?}");
     assert_eq!(bs[0]["task"], "a");
-    down_by_hand(&fx, "a");
+    down(&fx, "a");
     assert!(reg_blocks(&fx).is_empty());
 }
 
@@ -684,4 +668,79 @@ fn is_stale_never_blocks() {
 
     done_tx.send(()).unwrap();
     holder.join().unwrap();
+}
+
+#[test]
+fn rollback_keeps_preexisting_branch() {
+    let fx = Fixture::new();
+    fx.config(&fx.repo, "", BOOM);
+    git(&fx.repo, &["branch", "berth/a"]);
+    let out = up(&fx, &["a"]);
+    assert_eq!(code(&out), 3, "{}", stderr(&out));
+    assert!(branch_exists(&fx.repo, "berth/a"));
+    assert!(!wt(&fx, "a").exists());
+    assert!(reg_blocks(&fx).is_empty());
+    assert!(manifest_entries(&fx).is_empty());
+}
+
+#[test]
+fn rollback_keeps_preexisting_root_dir() {
+    let fx = Fixture::new();
+    fx.config(&fx.repo, "", BOOM);
+    let dir = wt(&fx, "a").parent().unwrap().to_path_buf();
+    fs::create_dir_all(&dir).unwrap();
+    let out = up(&fx, &["a"]);
+    assert_eq!(code(&out), 3, "{}", stderr(&out));
+    assert!(
+        dir.is_dir(),
+        "rollback removed a directory berth did not create"
+    );
+    assert!(!wt(&fx, "a").exists());
+}
+
+#[test]
+fn rollback_removes_root_dir_berth_created() {
+    let fx = Fixture::new();
+    fx.config(&fx.repo, "", BOOM);
+    let dir = wt(&fx, "a").parent().unwrap().to_path_buf();
+    assert_eq!(code(&up(&fx, &["a"])), 3);
+    assert!(!dir.exists());
+}
+
+#[test]
+fn worktree_add_failure_releases_ports_and_entry() {
+    let fx = Fixture::new();
+    fx.config(&fx.repo, "", "");
+    // `berth/a` is checked out in the main checkout, so `git worktree add` refuses it.
+    git(&fx.repo, &["checkout", "-q", "-b", "berth/a"]);
+    let out = up(&fx, &["a"]);
+    assert_eq!(code(&out), 3, "{}", stderr(&out));
+    assert!(reg_blocks(&fx).is_empty(), "{:?}", reg_blocks(&fx));
+    assert!(manifest_entries(&fx).is_empty());
+    assert!(!wt(&fx, "a").exists());
+    assert!(branch_exists(&fx.repo, "berth/a"));
+    assert!(
+        !wt(&fx, "a").parent().unwrap().exists(),
+        "root dir left behind"
+    );
+}
+
+#[test]
+fn keep_on_failure_copy_refusal_records_skipped() {
+    let fx = Fixture::new();
+    fx.config(
+        &fx.repo,
+        "",
+        "[copy]\ninclude = [\".env\"]\n[setup]\nrun = [\"true\"]",
+    );
+    write(&fx.repo, ".env", "T=1\n");
+    // A tracked `.berth` symlink makes the staging directory pass through a symlink.
+    std::os::unix::fs::symlink(fx.tmp.join("elsewhere"), fx.repo.join(".berth")).unwrap();
+    git(&fx.repo, &["add", "-f", ".berth"]);
+    git(&fx.repo, &["commit", "-q", "-m", "track .berth"]);
+    let out = up(&fx, &["a", "--keep-on-failure", "--json"]);
+    assert_eq!(code(&out), 1, "{}", stderr(&out));
+    let entries = manifest_entries(&fx);
+    assert_eq!(entries[0]["state"], "failed");
+    assert_eq!(entries[0]["setup"]["status"], "skipped");
 }
