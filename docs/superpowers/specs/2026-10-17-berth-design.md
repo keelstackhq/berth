@@ -2,8 +2,8 @@
 
 Date: 2026-10-17 · Status: approved (exit codes follow splice, §3)
 
-Names: repo `keelstackhq/berth`, binary `berth`, Cargo package `berth` if free, else `keel-berth`
-(lib `berth`; check crates.io at plan time, as hoist did), npm launcher `@keelstackhq/berth` with
+Names: repo `keelstackhq/berth`, binary `berth`, Cargo package `keel-berth` (crates.io `berth`
+taken, checked 2026-10-17), lib and bin `berth`, npm launcher `@keelstackhq/berth` with
 platform packages `@keelstackhq/berth-{linux-x64,linux-arm64,darwin-x64,darwin-arm64}` (the splice
 pattern; `win32-x64` from M3).
 
@@ -294,7 +294,7 @@ reserved ports re-probed; `creating` entries with dead owners. Exit 1 on any dri
 
 ```
 src/main.rs cli.rs lib.rs   clap (usage errors -> exit 2) -> run(Cli) -> Report -> table/JSON
-src/error.rs report.rs      BerthError (usage 2, config/env 3); Refusal (exit 1); Item, Action, Report
+src/error.rs report.rs      BerthError (usage 2, config/env 3); refusals are `Item`s with exit 1; Action, Report
 src/config.rs               berth.toml (deny unknown fields), defaults, .worktreeinclude fallback
 src/manifest.rs registry.rs .agents/worktrees.json; per-user ports.json; atomic writes
 src/lock.rs ports.rs        repo/user locks with owner record; slot hash, block search, bind probe
