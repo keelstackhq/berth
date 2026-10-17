@@ -50,7 +50,7 @@ pub(super) fn user_lock(state: &Path) -> Result<LockGuard, BerthError> {
     lock::acquire(&lock::user_lock(state), lock::lock_timeout())
 }
 
-fn state_name(state: State) -> &'static str {
+pub(super) fn state_name(state: State) -> &'static str {
     match state {
         State::Creating => "creating",
         State::Ready => "ready",
@@ -165,7 +165,7 @@ pub fn up(ctx: &Ctx, args: &UpArgs) -> Result<Report, BerthError> {
     } = match created {
         Ok(created) => created,
         Err(err) => {
-            cleanup("release ports", unreserve(&state, main, task));
+            cleanup("release ports", unreserve(&state, main, task).map(drop));
             cleanup("remove entry", remove_entry(main, task));
             return Err(err);
         }
@@ -543,14 +543,15 @@ fn cleanup(what: &str, result: Result<(), BerthError>) {
     }
 }
 
-/// Free every block of `(main, task)` under the user lock.
-fn unreserve(state: &Path, main: &Path, task: &str) -> Result<(), BerthError> {
+/// Free every block of `(main, task)` under the user lock; returns how many went.
+pub(super) fn unreserve(state: &Path, main: &Path, task: &str) -> Result<usize, BerthError> {
     let _guard = user_lock(state)?;
     let mut reg = Registry::load(state)?;
-    if reg.release(main, task) > 0 {
+    let freed = reg.release(main, task);
+    if freed > 0 {
         reg.save(state)?;
     }
-    Ok(())
+    Ok(freed)
 }
 
 /// Drop the task's manifest entry. The caller holds the repo lock.
@@ -629,7 +630,10 @@ impl Job<'_> {
             // Only succeeds when empty.
             let _ = std::fs::remove_dir(root);
         }
-        cleanup("release ports", unreserve(self.state, main, self.task));
+        cleanup(
+            "release ports",
+            unreserve(self.state, main, self.task).map(drop),
+        );
         cleanup(
             "remove the entry",
             repo_lock(self.repo).and_then(|_guard| remove_entry(main, self.task)),

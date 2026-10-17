@@ -246,7 +246,9 @@ fn deleted_dir_is_cleaned() {
     assert_eq!(find(&json(&out), "teardown").unwrap()["action"], "skipped");
     assert_eq!(worktree_count(&fx), 1);
     assert!(
-        !git(&fx.repo, &["worktree", "list", "--porcelain"]).contains("a\n"),
+        !git(&fx.repo, &["worktree", "list", "--porcelain"])
+            .lines()
+            .any(|l| l.starts_with("worktree ") && l.ends_with("/repo.berth/a")),
         "stale worktree record"
     );
     assert!(reg_blocks(&fx).is_empty());
@@ -356,4 +358,58 @@ fn unregistered_directory_is_left_alone() {
     assert!(path.join("precious.txt").is_file());
     assert!(manifest_entries(&fx).is_empty());
     assert!(reg_blocks(&fx).is_empty());
+}
+
+#[test]
+fn teardown_commit_keeps_branch_despite_delete_branch() {
+    // The branch was merged when down checked, but the teardown hook committed on it.
+    let fx = Fixture::new();
+    fx.config(
+        &fx.repo,
+        "",
+        "[teardown]\nrun = [\"git commit --allow-empty -q -m late\"]",
+    );
+    assert_eq!(code(&up(&fx, &["a"])), 0);
+    let out = down(&fx, &["a", "--delete-branch", "--json"]);
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    let v = json(&out);
+    let b = find(&v, "branch").unwrap();
+    assert_eq!(b["action"], "skipped", "{v}");
+    assert!(
+        b["reason"].as_str().unwrap().contains("unmerged commits"),
+        "{v}"
+    );
+    assert!(branch_exists(&fx.repo, "berth/a"), "commit lost");
+    assert!(!wt(&fx, "a").exists());
+    assert!(manifest_entries(&fx).is_empty());
+    assert!(reg_blocks(&fx).is_empty());
+}
+
+#[test]
+fn failed_worktree_remove_says_pass_force() {
+    // The teardown hook leaves an untracked file: plain `git worktree remove` refuses.
+    let fx = Fixture::new();
+    fx.config(&fx.repo, "", "[teardown]\nrun = [\"touch late.txt\"]");
+    assert_eq!(code(&up(&fx, &["a"])), 0);
+    let out = down(&fx, &["a"]);
+    assert_eq!(code(&out), 3, "{}", stderr(&out));
+    assert!(stderr(&out).contains("pass --force"), "{}", stderr(&out));
+    assert!(wt(&fx, "a").is_dir());
+    assert_eq!(manifest_entries(&fx)[0]["state"], "removing");
+    assert_eq!(reg_blocks(&fx).len(), 1);
+
+    let out = down(&fx, &["a", "--force"]);
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    assert!(!wt(&fx, "a").exists());
+}
+
+#[test]
+fn delete_branch_removes_a_user_named_merged_branch() {
+    let fx = Fixture::new();
+    fx.config(&fx.repo, "", "");
+    assert_eq!(code(&up(&fx, &["a", "--branch", "feature/mine"])), 0);
+    let out = down(&fx, &["a", "--delete-branch", "--json"]);
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    assert_eq!(find(&json(&out), "branch").unwrap()["action"], "remove");
+    assert!(!branch_exists(&fx.repo, "feature/mine"));
 }

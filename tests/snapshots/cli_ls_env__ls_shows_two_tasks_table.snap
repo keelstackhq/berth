@@ -1,0 +1,7 @@
+---
+source: tests/cli_ls_env.rs
+expression: stdout(&out)
+---
+KIND      KEY  ACTION  REASON
+worktree  a    ok      ready · berth/a · ahead 0 behind 0 · clean · [ROOT]/repo.berth/a
+worktree  b    ok      ready · berth/b · ahead 0 behind 0 · dirty · [ROOT]/repo.berth/b

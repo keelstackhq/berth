@@ -9,8 +9,8 @@ use crate::config;
 use crate::git;
 use crate::hooks::run_hooks;
 use crate::manifest::{Entry, Manifest, State};
-use crate::ops::up::{ports_item, repo_lock, user_lock};
-use crate::registry::{self, Registry};
+use crate::ops::up::{ports_item, repo_lock, unreserve};
+use crate::registry;
 use crate::report::{Action, Item, Report};
 use crate::{BerthError, Ctx, sys};
 
@@ -24,7 +24,7 @@ pub fn down(ctx: &Ctx, args: &DownArgs) -> Result<Report, BerthError> {
     let guard = repo_lock(repo)?;
     let mut manifest = Manifest::load(main)?;
     let Some(entry) = manifest.find(task).cloned() else {
-        let freed = release_ports(&state, main, task)?;
+        let freed = unreserve(&state, main, task)?;
         let mut report = Report::new("down");
         report.items.push(if freed > 0 {
             Item::new("ports", task, Action::Remove, "released an orphaned block")
@@ -125,7 +125,12 @@ pub fn down(ctx: &Ctx, args: &DownArgs) -> Result<Report, BerthError> {
         ));
     } else {
         if path.exists() {
-            git::worktree_remove(main, &path, args.force)?;
+            git::worktree_remove(main, &path, args.force).map_err(|err| match err {
+                BerthError::Git { .. } if !args.force => BerthError::Env(format!(
+                    "{err}; the entry stays `removing`: fix that or pass --force to remove it anyway"
+                )),
+                other => other,
+            })?;
         }
         items.push(Item::new(
             "worktree",
@@ -135,14 +140,25 @@ pub fn down(ctx: &Ctx, args: &DownArgs) -> Result<Report, BerthError> {
         ));
     }
     git::worktree_prune(main)?;
-    release_ports(&state, main, task)?;
+    unreserve(&state, main, task)?;
     items.push(ports_item(&entry.ports, Action::Remove));
     let mut manifest = Manifest::load(main)?;
     manifest.remove(task);
     manifest.save(main)?;
     if args.delete_branch && branch_present {
-        git::delete_branch(main, &entry.branch)?;
-        items.push(Item::new("branch", &entry.branch, Action::Remove, "merged"));
+        // The teardown hook may have committed since the check in step 4: never lose commits.
+        let base = git::resolve_commit(main, &cfg.worktree.base)?;
+        if git::is_ancestor(main, &entry.branch, &base)? {
+            git::delete_branch(main, &entry.branch)?;
+            items.push(Item::new("branch", &entry.branch, Action::Remove, "merged"));
+        } else {
+            items.push(Item::new(
+                "branch",
+                &entry.branch,
+                Action::Skipped,
+                "branch has unmerged commits (made during teardown); kept",
+            ));
+        }
     }
     if let Some(root) = path.parent() {
         // Only succeeds when empty.
@@ -160,17 +176,6 @@ fn refused(items: Vec<Item>, entry: &Entry) -> Report {
     report.exit_code = 1;
     report.worktrees = vec![entry.clone()];
     report
-}
-
-/// Free every block of `(main, task)` under the user lock; returns how many went.
-fn release_ports(state: &Path, main: &Path, task: &str) -> Result<usize, BerthError> {
-    let _guard = user_lock(state)?;
-    let mut reg = Registry::load(state)?;
-    let freed = reg.release(main, task);
-    if freed > 0 {
-        reg.save(state)?;
-    }
-    Ok(freed)
 }
 
 /// True when `path` is a linked worktree git knows about (never the main checkout).

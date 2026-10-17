@@ -239,8 +239,9 @@ and `doctor` as `drift: interrupted`; `down` cleans it.
   removes only the stale entries that overlap the block it chose; stale entries elsewhere stay.
 - Entries of the repo running `up` whose task has no manifest entry are dropped under its repo
   lock (provably stale: they are left by a crash between steps 4 and 5).
-- The probe is advisory: a process may take a port later; `ls`/`doctor` re-probe and report
-  `drift: port 21341 in use`, killing nothing.
+- The probe is advisory: a process may take a port later; `ls` shows listening ports as
+  information; a listening port is drift only when the task is not `ready` or its worktree
+  directory is missing (`doctor`). berth kills nothing.
 - No free block → exit 3 with "widen [ports].range or `berth down` unused tasks".
 
 ## 10. Copying untracked files
@@ -267,7 +268,10 @@ teardown hook, `git worktree remove` (`--force` passed through only with berth's
 resolves `[worktree].base` at that moment. It only inspects, runs hooks in and removes a path that
 `git worktree list` reports as a linked worktree; any other directory is left in place (item
 `skipped`). A task without an entry just frees any orphaned port block. Lines `up` added to
-`info/exclude` stay.
+`info/exclude` stay. A teardown hook may commit, so `--delete-branch` re-checks the merge state
+right before `git branch -D`; if the branch gained commits it is kept (item `skipped`). If
+`git worktree remove` fails without `--force` (e.g. the hook left untracked files), `down` exits 3
+with a message that says to pass `--force`; the entry stays `removing`.
 
 **ls**: one row per manifest entry plus unmanaged worktrees under `[worktree].root`
 (`drift: unmanaged`): task, state, branch, ahead/behind, dirty, ports listening, path. Exit 0
