@@ -83,7 +83,7 @@ fn run_one(
 
     let status = loop {
         match child.try_wait() {
-            Ok(Some(status)) => break status,
+            Ok(Some(status)) => break Some(status),
             Ok(None) => {}
             Err(source) => {
                 sys::kill_group(pgid);
@@ -97,20 +97,17 @@ fn run_one(
         if Instant::now() >= deadline {
             sys::kill_group(pgid);
             let _ = child.wait();
-            // Every writer is dead now, so the readers reach EOF.
-            for reader in readers {
-                let _ = reader.join();
-            }
-            return Err(fail(format!("timed out after {}s", timeout.as_secs_f64())));
+            break None;
         }
         thread::sleep(POLL);
     };
 
-    if !status.success() {
+    if status.is_none_or(|s| !s.success()) {
         // Removes leftover background processes before any rollback.
         sys::kill_group(pgid);
     }
-    // A background `cmd &` may hold the pipes open: wait a bounded time, then detach.
+    // A background `cmd &` (or a process that left the group) may hold the pipes open: wait a
+    // bounded time, then detach the readers.
     let grace_end = Instant::now() + READER_GRACE;
     for _ in 0..readers.len() {
         let left = grace_end.saturating_duration_since(Instant::now());
@@ -121,6 +118,9 @@ fn run_one(
     }
     drop(readers);
 
+    let Some(status) = status else {
+        return Err(fail(format!("timed out after {}s", timeout.as_secs_f64())));
+    };
     if status.success() {
         return Ok(());
     }

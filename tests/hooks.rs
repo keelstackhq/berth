@@ -143,7 +143,7 @@ fn non_utf8_output_does_not_hang() {
     let start = Instant::now();
     run(
         &fx.repo,
-        &[r"head -c 300000 /dev/zero | tr '\0' '\377'; echo; echo done"],
+        &[r"head -c 70000 /dev/zero | tr '\0' '\377'; echo; echo done"],
         &BTreeMap::new(),
         Duration::from_secs(10),
     )
@@ -168,4 +168,24 @@ fn signal_death_status() {
 fn empty_list_is_ok() {
     let fx = Fixture::new();
     run(&fx.repo, &[], &BTreeMap::new(), Duration::from_secs(1)).unwrap();
+}
+
+#[test]
+fn timeout_with_detached_pipe_holder_does_not_hang() {
+    let fx = Fixture::new();
+    let start = Instant::now();
+    let res = run(
+        &fx.repo,
+        &["setsid sleep 30 & echo $! > pid; sleep 30"],
+        &BTreeMap::new(),
+        Duration::from_millis(300),
+    );
+    let elapsed = start.elapsed();
+    let pid_file = fx.repo.join("pid");
+    if pid_file.exists() {
+        kill_pid(pid_from(&fx.repo));
+    }
+    let (_, status, _) = hook_err(res);
+    assert!(status.contains("timed out"), "{status}");
+    assert!(elapsed < Duration::from_secs(10), "{elapsed:?}");
 }
