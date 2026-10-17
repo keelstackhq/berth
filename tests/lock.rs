@@ -37,9 +37,9 @@ fn released_on_drop() {
     assert!(!std::fs::read(&path).unwrap().is_empty());
     drop(a);
     assert!(std::fs::read(&path).unwrap().is_empty());
-    let started = Instant::now();
-    let _b = acquire(&path, Duration::from_millis(200)).unwrap();
-    assert!(started.elapsed() < Duration::from_millis(200));
+    // A zero timeout tries once: success proves the lock was free right away,
+    // without a wall-clock assertion that flakes under load.
+    let _b = acquire(&path, Duration::ZERO).expect("lock free immediately after drop");
 }
 
 #[test]
