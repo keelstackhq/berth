@@ -1,0 +1,193 @@
+use std::collections::BTreeMap;
+use std::os::unix::process::CommandExt;
+use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::time::{Duration, Instant};
+
+use berth::BerthError;
+use berth::manifest::{
+    Entry, Manifest, Owner, PortBlock, SetupStatus, State, manifest_path, write_atomic,
+};
+use berth::registry::{Block, Registry, state_dir_from};
+use berth::sys::{kill_group, pid_alive, rfc3339};
+
+fn entry(task: &str) -> Entry {
+    Entry {
+        task: task.into(),
+        branch: format!("berth/{task}"),
+        base: "a1b2c3d".into(),
+        path: PathBuf::from(format!("/abs/hull.berth/{task}")),
+        state: State::Ready,
+        ports: PortBlock {
+            start: 21340,
+            end: 21349,
+            named: BTreeMap::from([("web".to_string(), 21340)]),
+        },
+        env: BTreeMap::from([
+            ("BERTH_TASK".to_string(), task.to_string()),
+            ("PORT".to_string(), "21340".to_string()),
+        ]),
+        copied: vec![".env".into()],
+        setup: SetupStatus {
+            status: "ok".into(),
+            secs: 14.2,
+        },
+        created_at: "2026-10-17T09:12:03Z".into(),
+        owner: Owner {
+            pid: 4242,
+            host: "laptop".into(),
+        },
+    }
+}
+
+fn block(repo: &str, task: &str, start: u16) -> Block {
+    Block {
+        start,
+        end: start + 9,
+        repo: PathBuf::from(repo),
+        task: task.into(),
+        created_at: "2026-10-17T09:12:03Z".into(),
+    }
+}
+
+#[test]
+fn rfc3339_vectors() {
+    assert_eq!(rfc3339(0), "1970-01-01T00:00:00Z");
+    assert_eq!(rfc3339(1792228323), "2026-10-17T09:12:03Z");
+    assert_eq!(rfc3339(951782400), "2000-02-29T00:00:00Z");
+}
+
+#[test]
+fn manifest_round_trip() {
+    let dir = tempfile::tempdir().unwrap();
+    let main = dir.path();
+    let mut manifest = Manifest::load(main).unwrap();
+    assert!(manifest.worktrees.is_empty());
+    assert_eq!(manifest.repo, main);
+    manifest.upsert(entry("fix-login"));
+    manifest.save(main).unwrap();
+    let text = std::fs::read_to_string(manifest_path(main)).unwrap();
+    assert!(text.contains("\"version\": 1"), "{text}");
+    assert!(text.ends_with("}\n"));
+    assert_eq!(Manifest::load(main).unwrap(), manifest);
+}
+
+#[test]
+fn manifest_parse_error_names_file() {
+    let dir = tempfile::tempdir().unwrap();
+    write_atomic(&manifest_path(dir.path()), b"{ nope").unwrap();
+    match Manifest::load(dir.path()) {
+        Err(BerthError::Config { file, .. }) => assert_eq!(file, manifest_path(dir.path())),
+        other => panic!("expected Config, got {other:?}"),
+    }
+}
+
+#[test]
+fn upsert_replaces_and_sorts() {
+    let mut manifest = Manifest {
+        version: 1,
+        repo: "/r".into(),
+        worktrees: vec![],
+    };
+    manifest.upsert(entry("b"));
+    manifest.upsert(entry("a"));
+    let mut changed = entry("b");
+    changed.branch = "other".into();
+    manifest.upsert(changed);
+    let tasks: Vec<_> = manifest.worktrees.iter().map(|e| e.task.as_str()).collect();
+    assert_eq!(tasks, ["a", "b"]);
+    assert_eq!(manifest.find("b").unwrap().branch, "other");
+    assert!(manifest.find("c").is_none());
+}
+
+#[test]
+fn remove_returns_entry() {
+    let mut manifest = Manifest {
+        version: 1,
+        repo: "/r".into(),
+        worktrees: vec![],
+    };
+    manifest.upsert(entry("a"));
+    assert_eq!(manifest.remove("a").unwrap().task, "a");
+    assert!(manifest.remove("a").is_none());
+    assert!(manifest.worktrees.is_empty());
+}
+
+#[test]
+fn atomic_write_leaves_no_temp() {
+    let dir = tempfile::tempdir().unwrap();
+    let target = dir.path().join("sub").join("file.json");
+    for i in 0..50 {
+        write_atomic(&target, format!("{i}\n").as_bytes()).unwrap();
+    }
+    let names: Vec<_> = std::fs::read_dir(target.parent().unwrap())
+        .unwrap()
+        .map(|e| e.unwrap().file_name().into_string().unwrap())
+        .collect();
+    assert_eq!(names, ["file.json"]);
+    assert_eq!(std::fs::read_to_string(&target).unwrap(), "49\n");
+}
+
+#[test]
+fn state_dir_precedence() {
+    let all = |k: &str| match k {
+        "BERTH_STATE_DIR" => Some("/b".to_string()),
+        "XDG_STATE_HOME" => Some("/x".to_string()),
+        "HOME" => Some("/h".to_string()),
+        _ => None,
+    };
+    assert_eq!(state_dir_from(all).unwrap(), Path::new("/b"));
+    let no_berth = |k: &str| if k == "BERTH_STATE_DIR" { None } else { all(k) };
+    assert_eq!(state_dir_from(no_berth).unwrap(), Path::new("/x/berth"));
+    let only_home = |k: &str| (k == "HOME").then(|| "/h".to_string());
+    assert_eq!(
+        state_dir_from(only_home).unwrap(),
+        Path::new("/h/.local/state/berth")
+    );
+    assert!(matches!(state_dir_from(|_| None), Err(BerthError::Env(_))));
+}
+
+#[test]
+fn registry_release_removes_all() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut reg = Registry::load(dir.path()).unwrap();
+    assert!(reg.blocks.is_empty());
+    reg.add(block("/r", "a", 21000));
+    reg.add(block("/r", "a", 21010));
+    reg.add(block("/r", "b", 21020));
+    assert_eq!(reg.overlaps(21005, 21015).len(), 2);
+    assert!(reg.overlaps(21030, 21039).is_empty());
+    assert_eq!(reg.release(Path::new("/r"), "a"), 2);
+    reg.save(dir.path()).unwrap();
+    let text = std::fs::read_to_string(dir.path().join("ports.json")).unwrap();
+    assert!(text.contains("\"version\": 1"));
+    let loaded = Registry::load(dir.path()).unwrap();
+    assert_eq!(loaded.blocks.len(), 1);
+    assert_eq!(loaded.blocks[0].task, "b");
+    let mut loaded = loaded;
+    assert_eq!(loaded.remove_where(|b| b.task == "b"), 1);
+    assert!(loaded.blocks.is_empty());
+}
+
+#[test]
+fn pid_alive_dead_and_live() {
+    assert!(pid_alive(std::process::id(), &berth::sys::hostname()));
+    let mut child = Command::new("true").spawn().unwrap();
+    let pid = child.id();
+    child.wait().unwrap();
+    assert!(!pid_alive(pid, &berth::sys::hostname()));
+    assert!(pid_alive(pid, "elsewhere"));
+}
+
+#[test]
+fn kill_group_kills_group() {
+    let mut child = Command::new("sh")
+        .args(["-c", "sleep 30 & wait"])
+        .process_group(0)
+        .spawn()
+        .unwrap();
+    kill_group(child.id());
+    let start = Instant::now();
+    child.wait().unwrap();
+    assert!(start.elapsed() < Duration::from_secs(2));
+}

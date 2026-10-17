@@ -1,8 +1,11 @@
-//! Manifest types (`.agents/worktrees.json`, spec §6). Reading and writing come later.
+//! Manifest types and I/O (`.agents/worktrees.json`, spec §6), plus the atomic writer.
 
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+
+use crate::error::BerthError;
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Manifest {
@@ -71,4 +74,85 @@ pub struct SetupStatus {
 pub struct Owner {
     pub pid: u32,
     pub host: String,
+}
+
+/// Write `bytes` to `path` atomically: temp file `.<name>.tmp.<pid>` in the same directory,
+/// `sync_all`, `rename`. Parent directories are created; the temp file is removed on any error.
+pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), BerthError> {
+    let io = |path: &Path| {
+        let path = path.to_path_buf();
+        move |source| BerthError::Io { path, source }
+    };
+    let parent = path.parent().filter(|p| !p.as_os_str().is_empty());
+    let dir = parent.unwrap_or_else(|| Path::new("."));
+    std::fs::create_dir_all(dir).map_err(io(dir))?;
+    let name = path
+        .file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default();
+    let tmp = dir.join(format!(".{name}.tmp.{}", std::process::id()));
+    let result = (|| {
+        let mut file = std::fs::File::create(&tmp)?;
+        file.write_all(bytes)?;
+        file.sync_all()?;
+        std::fs::rename(&tmp, path)
+    })();
+    if let Err(source) = result {
+        let _ = std::fs::remove_file(&tmp);
+        return Err(BerthError::Io {
+            path: path.to_path_buf(),
+            source,
+        });
+    }
+    Ok(())
+}
+
+pub fn manifest_path(main: &Path) -> PathBuf {
+    main.join(".agents").join("worktrees.json")
+}
+
+impl Manifest {
+    /// A missing file is an empty manifest for `main`; a parse error is a `Config` error.
+    pub fn load(main: &Path) -> Result<Manifest, BerthError> {
+        let path = manifest_path(main);
+        let bytes = match std::fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+                return Ok(Manifest {
+                    version: 1,
+                    repo: main.to_path_buf(),
+                    worktrees: Vec::new(),
+                });
+            }
+            Err(source) => return Err(BerthError::Io { path, source }),
+        };
+        serde_json::from_slice(&bytes).map_err(|e| BerthError::Config {
+            file: path,
+            message: format!("invalid manifest: {e}; fix or delete the file"),
+        })
+    }
+
+    pub fn save(&self, main: &Path) -> Result<(), BerthError> {
+        let mut bytes = serde_json::to_vec_pretty(self).expect("manifest serializes");
+        bytes.push(b'\n');
+        write_atomic(&manifest_path(main), &bytes)
+    }
+
+    pub fn find(&self, task: &str) -> Option<&Entry> {
+        self.worktrees.iter().find(|e| e.task == task)
+    }
+
+    /// Replace the entry with the same task, else add it; entries stay sorted by task.
+    pub fn upsert(&mut self, entry: Entry) {
+        match self.worktrees.iter_mut().find(|e| e.task == entry.task) {
+            Some(slot) => *slot = entry,
+            None => self.worktrees.push(entry),
+        }
+        self.worktrees.sort_by(|a, b| a.task.cmp(&b.task));
+    }
+
+    pub fn remove(&mut self, task: &str) -> Option<Entry> {
+        let at = self.worktrees.iter().position(|e| e.task == task)?;
+        Some(self.worktrees.remove(at))
+    }
 }

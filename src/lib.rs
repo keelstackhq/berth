@@ -6,7 +6,9 @@ pub mod env;
 pub mod error;
 pub mod manifest;
 pub mod ops;
+pub mod registry;
 pub mod report;
+pub mod sys;
 
 pub use cli::Cli;
 pub use error::BerthError;

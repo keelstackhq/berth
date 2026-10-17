@@ -15,7 +15,7 @@ binary. Part of the keelstackhq family (hull, splice, hoard, hoist).
 ```
 src/main.rs cli.rs lib.rs   clap (usage errors -> 2) -> run(Cli) -> Report -> table/JSON/text
 src/error.rs report.rs      BerthError (2 usage, 3 rest); Action, Item, Report; render_*
-src/manifest.rs             Manifest/Entry types (.agents/worktrees.json); registry, lock, ports,
+src/manifest.rs sys.rs registry.rs   manifest I/O + write_atomic; time/pid helpers; ports.json; lock, ports,
                             git, copy, hooks and ops/{up,down,ls,env,doctor} follow per plan
 tests/common/mod.rs         Fixture: hermetic repo, HOME, state dir, TMPDIR, port window
 tests/cli_*.rs              integration tests; insta snapshots in tests/snapshots/
