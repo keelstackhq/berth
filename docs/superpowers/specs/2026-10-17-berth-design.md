@@ -284,6 +284,9 @@ with a message that says to pass `--force`; the entry stays `removing`.
 `git worktree list` consistent; every manifest path exists; copy patterns ignored by git;
 manifest path ignored; worktree root not inside a tracked directory; stale registry entries;
 reserved ports re-probed; `creating` entries with dead owners. Exit 1 on any drift, 3 on errors.
+Lock-free and file-free like `ls`. Manifest, exclude, port and owner checks run only when
+`.agents/worktrees.json` exists. A listening port is drift only when its task is not `ready` or
+its worktree directory is gone.
 
 ## 12. Integration with hoard, hull, logbook, hoist
 

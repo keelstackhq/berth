@@ -68,6 +68,6 @@ pub fn run(cli: Cli) -> Result<Report, BerthError> {
         cli::Command::Down(args) => ops::down::down(&ctx, args),
         cli::Command::Ls => ops::ls::ls(&ctx),
         cli::Command::Env(args) => ops::env::env(&ctx, args),
-        other => Ok(Report::new(other.name())),
+        cli::Command::Doctor => ops::doctor::doctor(&ctx),
     }
 }
