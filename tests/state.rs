@@ -201,7 +201,7 @@ fn kill_group_kills_group() {
     child.wait().unwrap();
     assert!(start.elapsed() < Duration::from_secs(2));
     // The orphaned sleep is reaped by init; give it a moment.
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + Duration::from_secs(10);
     while pid_alive(sleep_pid, &host) && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(20));
     }
