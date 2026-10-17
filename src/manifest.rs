@@ -42,6 +42,24 @@ pub struct PortBlock {
     pub named: BTreeMap<String, u16>,
 }
 
+impl PortBlock {
+    /// A block of `count` ports from `start`; each name maps to `start + offset`.
+    pub fn new(start: u16, count: u16, names: &BTreeMap<String, u16>) -> PortBlock {
+        PortBlock {
+            start,
+            end: start + count - 1,
+            named: names
+                .iter()
+                .map(|(n, off)| (n.clone(), start + off))
+                .collect(),
+        }
+    }
+
+    pub fn count(&self) -> u16 {
+        self.end - self.start + 1
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct SetupStatus {
     /// `ok`, `failed`, `skipped` or `running`.
