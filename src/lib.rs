@@ -4,6 +4,7 @@ pub mod cli;
 pub mod config;
 pub mod env;
 pub mod error;
+pub mod git;
 pub mod lock;
 pub mod manifest;
 pub mod ops;
@@ -51,6 +52,7 @@ pub fn run(cli: Cli) -> Result<Report, BerthError> {
             source,
         })?,
     };
+    let _repo = git::discover(&dir)?;
     let _ctx = Ctx {
         dir,
         verbose: cli.verbose,

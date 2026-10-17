@@ -77,7 +77,7 @@ fn prefers_index_when_free() {
 
 #[test]
 fn wraps_around() {
-    // Single-block-wide trick: use a range where the preferred block is the last one.
+    // Pick a task whose preferred block is the last one, so the scan has to wrap past the end.
     let bs = blocks(RANGE, 10);
     let n = bs.len();
     let task = (0..10_000)
@@ -143,8 +143,13 @@ fn bind_prober_sees_wildcard_v6() {
 
 #[test]
 fn bind_prober_free_port() {
-    let l = TcpListener::bind("127.0.0.1:0").unwrap();
-    let port = l.local_addr().unwrap().port();
-    drop(l);
-    assert!(BindProber.is_free(port));
+    // Another process may grab the port between drop and probe; any of 5 fresh ports reading
+    // free proves the prober, while a prober that always says "busy" still fails.
+    let free = (0..5).any(|_| {
+        let l = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = l.local_addr().unwrap().port();
+        drop(l);
+        BindProber.is_free(port)
+    });
+    assert!(free);
 }

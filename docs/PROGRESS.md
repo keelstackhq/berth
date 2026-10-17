@@ -2,7 +2,7 @@
 
 ## Status
 
-Milestone 1, plan `docs/superpowers/plans/2026-10-17-berth-m1.md`: Tasks 1-6 done.
+Milestone 1, plan `docs/superpowers/plans/2026-10-17-berth-m1.md`: Tasks 1-7 done.
 
 ## Done
 
@@ -12,6 +12,7 @@ Milestone 1, plan `docs/superpowers/plans/2026-10-17-berth-m1.md`: Tasks 1-6 don
 - 2026-10-17 · Task 4 · manifest I/O, port registry, atomic writes, sys helpers (`src/manifest.rs`, `registry.rs`, `sys.rs`) · `cargo test --test state` 10/10
 - 2026-10-17 · Task 5 · repo and user locks with holder record, read-only `is_held` probe (`src/lock.rs`) · `cargo test --test lock` 5/5
 - 2026-10-17 · Task 6 · deterministic port block allocation, bind+connect prober (`src/ports.rs`) · `cargo test --test ports` 12/12
+- 2026-10-17 · Task 7 · git CLI wrapper, version check, `run` discovers the repo first (`src/git.rs`); ports prober flake fixed · `cargo test --test git` 16/16, full suite 3 runs green
 
 ## Blocked
 
