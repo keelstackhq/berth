@@ -2,8 +2,8 @@
 
 Date: 2026-10-17 · Status: approved (exit codes follow splice, §3)
 
-Names: repo `keelstackhq/berth`, binary `berth`, Cargo package `berth` if free, else `keel-berth`
-(lib `berth`; check crates.io at plan time, as hoist did), npm launcher `@keelstackhq/berth` with
+Names: repo `keelstackhq/berth`, binary `berth`, Cargo package `keel-berth` (crates.io `berth`
+taken, checked 2026-10-17), lib and bin `berth`, npm launcher `@keelstackhq/berth` with
 platform packages `@keelstackhq/berth-{linux-x64,linux-arm64,darwin-x64,darwin-arm64}` (the splice
 pattern; `win32-x64` from M3).
 
@@ -63,10 +63,12 @@ Global flags: `-C <dir>`, `--json`, `--no-color`, `-v`. `<task>` is a slug
 ### Exit codes
 
 `0` ok · `1` refused or drift (dirty worktree on `down`, task exists with different settings, a
-copy-listed file git does not ignore, worktree limit reached, `doctor` found drift) · `2` usage
-(bad flags or arguments, invalid task slug; clap usage errors exit 2) · `3` config or environment
-error (unknown `berth.toml` key, git missing or too old, no free port block, lock timeout, setup
-hook failed); the message says how to fix it.
+copy-listed file git does not ignore, worktree limit reached, task being created by a live `up`:
+"task is being created by pid N", `doctor` found drift) · `2` usage (bad flags or arguments,
+invalid task slug, invalid `--branch`; clap usage errors exit 2) · `3` config or environment
+error (unknown `berth.toml` key, git missing or too old, unknown or `-`-prefixed `--base`: "unknown
+--base ref `<x>`; berth never fetches, run `git fetch` first", no free port block, lock timeout,
+setup hook failed); the message says how to fix it.
 
 Justification: berth follows splice's scheme (0 ok · 1 refused/drift · 2 usage · 3 config or
 environment) because berth has no human steps, which is what hoist's `2` means. Agents only need
@@ -123,6 +125,8 @@ timeout_secs = 900              # [teardown] has the same keys; runs before remo
 ```
 
 No `[copy]` but a `.worktreeinclude` file → its patterns are used (confirm format at plan time).
+`.worktreeinclude` matches that git does not ignore are `skipped` (Claude Code behaviour); `[copy]`
+matches that git does not ignore are `refused`.
 
 ## 5. Worktree location (decision)
 
@@ -178,20 +182,38 @@ never exported: they stay in `.env`, read by the app's own loader.
 
 ## 8. `berth up`, step by step
 
-1. Validate task (2 on error), load config, resolve main checkout (`git rev-parse --git-common-dir`)
-   (3 on error).
-2. Take the repo lock `<git-common-dir>/berth.lock`; then the user lock `<state>/ports.lock`.
-   Lock order is always repo → user, so two repos and two tasks cannot deadlock.
-3. Check: task not present (else §3 idempotency), `max` not reached, every `[copy]` match is
+1. Validate task (2 on error), load config, resolve main checkout (3 on error). The main checkout
+   is the first entry of `git worktree list --porcelain -z`. For a `--separate-git-dir` repo git
+   lists the git dir itself first; then main is `git rev-parse --show-toplevel` run from the main
+   checkout, and from a linked worktree of such a repo berth fails closed (exit 3, "run berth from
+   the main checkout"). The common dir is `git rev-parse --git-common-dir`. The branch name is
+   checked (`git check-ref-format --branch`, exit 2) and the base resolved (exit 3) here, before
+   any lock, port or file. A manifest tracked by git (`git ls-files --error-unmatch
+   .agents/worktrees.json`) is exit 3: "run git rm --cached .agents/worktrees.json".
+2. Take the repo lock `<git-common-dir>/berth.lock`. The user lock `<state>/ports.lock` is taken
+   in step 4 only. Lock order is always repo → user, so two repos and two tasks cannot deadlock.
+3. Check: task not present (else §3 idempotency; a `creating` entry whose owner is alive → exit 1
+   "task is being created by pid N"), path free, `max` not reached, every `[copy]` match is
    ignored by git (`git check-ignore`) — a copy-listed file git would track is refused (exit 1:
-   "add it to .gitignore"), because the agent would commit the secret.
-4. Allocate ports (§9) and write `ports.json`; release the user lock.
-5. `git worktree add -b <branch> <path> <base>` (or check out an existing `--branch`); write the
-   manifest entry with `state: creating`. Release the repo lock.
+   "add it to .gitignore"), because the agent would commit the secret. Nothing is created on
+   any of these paths.
+4. Under the user lock: allocate ports (§9) and write `ports.json`; release the user lock.
+5. Still under the repo lock, in this order: add `/.berth/`, `/.agents/.*.tmp.*` and (unless git
+   already ignores it) `/.agents/worktrees.json` to `<git-common-dir>/info/exclude`; write the
+   manifest entry with `state: creating` and its owner; then `git worktree add -b <branch> <path>
+   <base>`, or check out the branch if it exists. An existing branch records `base =
+   merge-base(branch, resolved base)`, and a given `--base` is reported `skipped` with a warning
+   on stderr. A failure in this step frees the ports and drops the entry. Release the repo lock.
 6. Copy files (§10). Create `<wt>/.berth/tmp` (`/.berth/` is added to `.git/info/exclude`).
 7. Run `[setup].run` in the worktree with the §7 env, output → stderr, with the timeout
    (`--no-setup` skips it).
-8. Retake the repo lock, set `state: ready` (or `failed`), release.
+   Each hook runs in its own process group; a timeout or failure kills the whole group. Ctrl-C
+   does not reach the hook; if berth dies the hook keeps running and the entry shows
+   `drift: interrupted`.
+   A timeout fails the hook with status `timed out after Ns`; output readers are given 1 s to
+   finish after the kill, then dropped, so a process that left the group cannot hang berth.
+8. Retake the repo lock, set `state: ready` (or `failed`), release. A lock timeout here exits 3
+   and says to run `berth down <task>` (setup finished; the entry stays `creating`).
 
 On failure after step 5, berth rolls back (teardown, worktree remove, branch delete if berth made
 it and it has no commits, ports freed) and exits 3 with the failed step and the last 20 hook-output
@@ -211,10 +233,17 @@ and `doctor` as `drift: interrupted`; `down` cleans it.
   which keeps bookmarks and OAuth callback URLs working.
 - A block is free when no registry entry overlaps it **and** every port binds on `127.0.0.1` and,
   if IPv6 is available, `[::1]` (bind, then drop at once). This catches non-berth processes.
-- Registry entries whose repo path no longer exists, or whose task is not in that repo's manifest,
-  are stale: `doctor` reports them; `up` reclaims them only after the bind probe passes.
-- The probe is advisory: a process may take a port later; `ls`/`doctor` re-probe and report
-  `drift: port 21341 in use`, killing nothing.
+- A registry entry of another repo is stale when its repo path no longer exists, or when its task
+  is not in that repo's manifest **and** that repo's lock is not held (an `up` there may be
+  between writing ports and writing the manifest). The check is read-only and never blocks: an
+  unreadable or invalid foreign manifest, or a path that is no longer a repo, is not stale.
+  `doctor` reports stale entries. `up` treats them as free, and after the bind probe passes
+  removes only the stale entries that overlap the block it chose; stale entries elsewhere stay.
+- Entries of the repo running `up` whose task has no manifest entry are dropped under its repo
+  lock (provably stale: they are left by a crash between steps 4 and 5).
+- The probe is advisory: a process may take a port later; `ls` shows listening ports as
+  information; a listening port is drift only when the task is not `ready` or its worktree
+  directory is missing (`doctor`). berth kills nothing.
 - No free block → exit 3 with "widen [ports].range or `berth down` unused tasks".
 
 ## 10. Copying untracked files
@@ -237,6 +266,17 @@ are gitignored by rule (§8.3), so they never block. Commits are safe because th
 `--delete-branch` deletes it only if it is merged into `base` (else refused, exit 1). Then
 teardown hook, `git worktree remove` (`--force` passed through only with berth's `--force`),
 `git worktree prune`, release ports, drop the manifest entry.
+`down` refuses (exit 1) while a live process is still creating the task, and `--delete-branch`
+resolves `[worktree].base` at that moment. An owner on another host cannot be verified and counts
+as live; there the refusal (and `doctor`'s "cannot verify" item) names `berth down --force <task>`,
+and `--force` skips this refusal. A live owner pid on this host refuses even with `--force` (it
+may be a real running `up`). `down` only inspects, runs hooks in and removes a path that
+`git worktree list` reports as a linked worktree; any other directory is left in place (item
+`skipped`). A task without an entry just frees any orphaned port block. Lines `up` added to
+`info/exclude` stay. A teardown hook may commit, so `--delete-branch` re-checks the merge state
+right before `git branch -D`; if the branch gained commits it is kept (item `skipped`). If
+`git worktree remove` fails without `--force` (e.g. the hook left untracked files), `down` exits 3
+with a message that says to pass `--force`; the entry stays `removing`.
 
 **ls**: one row per manifest entry plus unmanaged worktrees under `[worktree].root`
 (`drift: unmanaged`): task, state, branch, ahead/behind, dirty, ports listening, path. Exit 0
@@ -249,6 +289,9 @@ teardown hook, `git worktree remove` (`--force` passed through only with berth's
 `git worktree list` consistent; every manifest path exists; copy patterns ignored by git;
 manifest path ignored; worktree root not inside a tracked directory; stale registry entries;
 reserved ports re-probed; `creating` entries with dead owners. Exit 1 on any drift, 3 on errors.
+Lock-free and file-free like `ls`. Manifest, exclude, port and owner checks run only when
+`.agents/worktrees.json` exists. A listening port is drift only when its task is not `ready` or
+its worktree directory is gone.
 
 ## 12. Integration with hoard, hull, logbook, hoist
 
@@ -294,7 +337,7 @@ reserved ports re-probed; `creating` entries with dead owners. Exit 1 on any dri
 
 ```
 src/main.rs cli.rs lib.rs   clap (usage errors -> exit 2) -> run(Cli) -> Report -> table/JSON
-src/error.rs report.rs      BerthError (usage 2, config/env 3); Refusal (exit 1); Item, Action, Report
+src/error.rs report.rs      BerthError (usage 2, config/env 3); refusals are `Item`s with exit 1; Action, Report
 src/config.rs               berth.toml (deny unknown fields), defaults, .worktreeinclude fallback
 src/manifest.rs registry.rs .agents/worktrees.json; per-user ports.json; atomic writes
 src/lock.rs ports.rs        repo/user locks with owner record; slot hash, block search, bind probe
@@ -309,8 +352,8 @@ All fetching-free; versions are **not** stated here and are pinned exactly in th
 `cargo search`/crates.io checks, dated in `docs/PROGRESS.md`:
 
 - `clap` (derive) — CLI. `serde`, `serde_json` — manifest and `--json`. `toml` — config with
-  `deny_unknown_fields`. `thiserror` — error enum. `globset` — copy patterns.
-  `wait-timeout` — hook timeouts (or a std-only loop; decide in the plan).
+  `deny_unknown_fields`. `thiserror` — error enum. `globset` not used: git matches the copy patterns via
+  `ls-files --exclude`/`--exclude-from`. `wait-timeout` not used: std `try_wait` loop for hook timeouts.
 - Dev: `tempfile`, `assert_cmd`, `predicates`, `insta` (json, yaml features as needed).
 - Not used: `git2`/`gix` (git CLI, as in splice), any HTTP/TLS crate (no network calls, so the
   family's "rustls only" rule holds trivially), `dirs` (the state-dir rule is three lines).
@@ -330,6 +373,13 @@ All fetching-free; versions are **not** stated here and are pinned exactly in th
 - `std::fs::File::lock` stable version vs the pinned toolchain; behaviour on macOS APFS and NFS.
 - Vite+: `VITE_CACHE_PATH` is honoured for the task cache; turbo: `TURBO_CACHE_DIR` relative vs
   absolute handling, and whether cache entries are ever rewritten in place (for M2 hard-linking).
+- Verified 2026-10-17 (M1 dogfood, keelstackhq/example-app, Vite+ 1.1.0, turbo 2.11.8, pnpm 12.11.2):
+  `TURBO_CACHE_DIR=<wt>/.turbo/cache` is honoured (63 entries after `pnpm run ci`, none in the main
+  checkout). `VITE_CACHE_PATH` produced no `task-cache` directory: packages call `vp test/lint/...`
+  directly (never `vp run`), so Vite+ writes no task cache; only vitest's per-package
+  `node_modules/.vite` appears. Whether `VITE_CACHE_PATH` is honoured by `vp run` stays unverified.
+  Two worktrees ran `pnpm run ci` (21/21 tasks, exit 0) and two `vp dev` servers on their own
+  `WEB_PORT` at the same time.
 - Claude Code: `.worktreeinclude` format, worktree-create/remove hook names and payload, and the
   SessionStart env-file mechanism; Codex equivalents if any.
 

@@ -1,0 +1,8 @@
+# Hermetic git for every `cargo test` and `cargo run` process: no ~/.gitconfig, fixed identity.
+[env]
+GIT_CONFIG_GLOBAL = { value = "/dev/null", force = true }
+GIT_CONFIG_NOSYSTEM = { value = "1", force = true }
+GIT_AUTHOR_NAME = { value = "berth-test", force = true }
+GIT_AUTHOR_EMAIL = { value = "berth-test@example.invalid", force = true }
+GIT_COMMITTER_NAME = { value = "berth-test", force = true }
+GIT_COMMITTER_EMAIL = { value = "berth-test@example.invalid", force = true }
