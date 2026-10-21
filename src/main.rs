@@ -51,7 +51,7 @@ fn print_report(report: &Report, json: bool, color: bool) {
     }
 }
 
-const COMMANDS: [&str; 5] = ["up", "down", "ls", "env", "doctor"];
+const COMMANDS: [&str; 6] = ["up", "down", "ls", "env", "gc", "doctor"];
 
 /// A clap usage error with `--json` anywhere in argv still prints one Report (exit 2) on stdout;
 /// the usage text has already gone to stderr.

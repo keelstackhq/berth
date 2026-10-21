@@ -54,6 +54,7 @@ berth up <task> [--base REF] [--branch NAME] [--no-setup] [--keep-on-failure] [-
 berth down <task> [--force] [--delete-branch] [--json]
 berth ls [--json]
 berth env [<task>] [--format sh|fish|dotenv|json]   task defaults to the worktree of the cwd
+berth gc [--dry-run] [--delete-branch] [--json]
 berth doctor [--json]
 ```
 
@@ -64,11 +65,11 @@ Global flags: `-C <dir>`, `--json`, `--no-color`, `-v`. `<task>` is a slug
 
 `0` ok · `1` refused or drift (dirty worktree on `down`, task exists with different settings, a
 copy-listed file git does not ignore, worktree limit reached, task being created by a live `up`:
-"task is being created by pid N", `doctor` found drift) · `2` usage (bad flags or arguments,
+"task is being created by pid N", `doctor` found drift, a `gc` removal that `down` refused) · `2` usage (bad flags or arguments,
 invalid task slug, invalid `--branch`; clap usage errors exit 2) · `3` config or environment
 error (unknown `berth.toml` key, git missing or too old, unknown or `-`-prefixed `--base`: "unknown
 --base ref `<x>`; berth never fetches, run `git fetch` first", no free port block, lock timeout,
-setup hook failed); the message says how to fix it.
+setup hook failed, a `gc` removal that failed); the message says how to fix it.
 
 Justification: berth follows splice's scheme (0 ok · 1 refused/drift · 2 usage · 3 config or
 environment) because berth has no human steps, which is what hoist's `2` means. Agents only need
@@ -350,6 +351,20 @@ nothing (the file lives in the worktree). A failed drop exits 3 and keeps the en
 ("fix it and run berth down <task> again, or pass --force"). `--force` adds `--force` to `dropdb`
 and, if the drop still fails, warns and continues (item `db <name> drift`, "not dropped (ignored
 by --force)").
+
+**gc** `[--dry-run] [--delete-branch]`: removes finished tasks, each exactly as `berth down <task>`
+(same locks, refusals, teardown and database drop; never `--force`; `--delete-branch` is passed
+through and the branch is merged by definition). The scan takes no lock. A task is removed only
+when it is `ready`, its path is a registered linked worktree, its branch exists and has at least
+one commit beyond the recorded `base` (a fresh task is never "merged"), the branch is merged into
+the resolved `[worktree].base` (the "merged" rule of `down`, so squash merges count only with git
+>= 2.38; `git pull` first, berth never fetches) and the worktree is clean. Every other entry is
+item `worktree <task> skipped` with `kept: state <s>`, `worktree missing`, `branch missing`, `no
+commits yet`, `not merged into <base>` or `uncommitted changes`. `--dry-run` reports `ok` "would
+remove" and changes nothing. No entries: item `gc repo ok` "nothing to collect". The report's
+`worktrees` lists the entries removed (or that would be). Exit 0; 1 if a `down` refused (its
+refusal items are included); 3 if a `down` failed (an `error <task>` item; the other tasks still
+run). Removals run one after another in manifest order.
 
 **ls**: one row per manifest entry plus unmanaged worktrees under `[worktree].root`
 (`drift: unmanaged`): task, state, branch, ahead/behind, dirty, ports listening, path. Exit 0
