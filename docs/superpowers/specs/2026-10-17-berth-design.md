@@ -214,6 +214,13 @@ Per user (ports are machine-wide): `$BERTH_STATE_DIR`, else `$XDG_STATE_HOME/ber
 - With `[db]`: the URL as `[db].env` (default `DATABASE_URL`; `""` exports none), and
   `COMPOSE_PROJECT_NAME=<project>` for compose. `[env]` cannot set either (§4).
 
+- With `[cache] remote = "hoard"` and a running server (§12), `berth env` adds `TURBO_API` and
+  `TURBO_TEAM=hoard`, read live (never stored in the manifest or `--json`). `sh` ends with
+  `export TURBO_TOKEN="$(cat '<token file>')"` and `fish` with `set -gx TURBO_TOKEN (cat '<token
+  file>')`, so the token is never printed; `dotenv`/`json` omit it and say
+  `note: TURBO_TOKEN is not printed; read it from <token file>` on stderr. Setup and teardown hooks
+  get all three with the real token. No server: nothing exported, one `warning:` on stderr, exit 0.
+
 Formats: `sh` (`export K='v'`, escaped), `fish`, `dotenv`, `json`. Copied files' values are
 never exported: they stay in `.env`, read by the app's own loader.
 
@@ -365,7 +372,10 @@ its worktree directory is gone.
   keys are immutable with if-not-exists writes, so many worktrees can share one remote safely. M2:
   `[cache] remote = "hoard"` makes `berth env` export `TURBO_API`/`TURBO_TOKEN`/`TURBO_TEAM` for a
   `hoard serve --storage fs` the user (or a hull hook) runs; berth does not start or supervise it
-  (no daemon). `[cache] turbo_seed = "link"|"copy"` (default `off`) seeds a new worktree's
+  (no daemon). berth reads `<main>/<hoard_dir>/port` (u16) and `token` (non-empty) live, since
+  `hoard serve` writes them in its cwd (`./.hoard/`; default `hoard_dir = ".hoard"`) and may
+  restart on another port; either missing or invalid means no server (§7 for the output rules).
+  The token is a secret: only hook environments get its value, and `-v` never logs it. `[cache] turbo_seed = "link"|"copy"` (default `off`) seeds a new worktree's
   `.turbo/cache` from the main checkout's: top-level regular files only (no symlinks,
   subdirectories or `*.tmp`), existing targets kept; `link` hard-links and copies any file it cannot
   link, `copy` always copies (temp + rename). Skipped (item `skipped`) when `.turbo/` is not

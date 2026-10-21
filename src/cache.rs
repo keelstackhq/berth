@@ -1,9 +1,10 @@
 //! Build-cache helpers (spec §12): seed the turbo cache from the main checkout.
 
+use std::collections::BTreeMap;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use crate::config::Seed;
+use crate::config::{CacheCfg, Remote, Seed};
 use crate::copy::{copy_one, symlink_in_parents};
 use crate::git;
 use crate::report::{Action, Item};
@@ -98,4 +99,66 @@ fn seed(source: &Path, wt: &Path, mode: Seed) -> Result<(usize, usize), String> 
         }
     }
     Ok((linked, copied))
+}
+
+/// A running `hoard serve`, read live from its port and token files (spec §12). `token` is a
+/// secret: it goes into hook environments only, never into output, logs or the manifest.
+pub struct Hoard {
+    pub api: String,
+    pub token_file: PathBuf,
+    pub token: String,
+}
+
+/// The hoard server of `main`, for `remote = "hoard"` only. When no server is running, one
+/// `warning:` goes to stderr and the result is `None`; call it once per command.
+pub fn hoard(main: &Path, cache: &CacheCfg) -> Option<Hoard> {
+    if cache.remote != Remote::Hoard {
+        return None;
+    }
+    let dir = main.join(&cache.hoard_dir);
+    let port_file = dir.join("port");
+    let token_file = dir.join("token");
+    let port = match fs::read_to_string(&port_file) {
+        Ok(text) => text.trim().parse::<u16>().map_err(|_| "invalid"),
+        Err(_) => Err("missing"),
+    };
+    let token = match fs::read_to_string(&token_file) {
+        Ok(text) if !text.trim().is_empty() => Ok(text.trim().to_string()),
+        Ok(_) => Err("empty"),
+        Err(_) => Err("missing"),
+    };
+    match (port, token) {
+        (Ok(port), Ok(token)) => Some(Hoard {
+            api: format!("http://127.0.0.1:{port}"),
+            token_file,
+            token,
+        }),
+        (port, token) => {
+            let (file, why) = match (port, token) {
+                (Err(why), _) => (port_file, why),
+                (_, Err(why)) => (token_file, why),
+                _ => unreachable!(),
+            };
+            eprintln!(
+                "warning: no running hoard server ({} {why}); start hoard serve --storage fs in {}",
+                file.display(),
+                main.display()
+            );
+            None
+        }
+    }
+}
+
+/// `base` plus `TURBO_API`, `TURBO_TEAM` and `TURBO_TOKEN` when a server runs. For hooks only.
+pub fn hook_env(
+    base: &BTreeMap<String, String>,
+    hoard: Option<&Hoard>,
+) -> BTreeMap<String, String> {
+    let mut env = base.clone();
+    if let Some(h) = hoard {
+        env.insert("TURBO_API".into(), h.api.clone());
+        env.insert("TURBO_TEAM".into(), "hoard".into());
+        env.insert("TURBO_TOKEN".into(), h.token.clone());
+    }
+    env
 }

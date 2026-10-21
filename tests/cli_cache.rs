@@ -206,3 +206,258 @@ fn down_after_seeding_is_not_dirty() {
     assert_eq!(code(&out), 0, "{}{}", stdout(&out), stderr(&out));
     assert!(!wt(&fx, "a").exists());
 }
+
+// ---- Task 7: hoard remote-cache export ----
+
+const CANARY: &str = "BERTH_CANARY_hoard_7c1f";
+
+fn hoard_fixture(rest: &str) -> Fixture {
+    let fx = Fixture::new();
+    write(&fx.repo, ".gitignore", ".env\n.hoard/\n.hoard-seen\n");
+    git(&fx.repo, &["add", ".gitignore"]);
+    git(&fx.repo, &["commit", "-q", "-m", "ignore hoard"]);
+    write(&fx.repo, ".hoard/port", "41234\n");
+    write(&fx.repo, ".hoard/token", CANARY);
+    fx.config(
+        &fx.repo,
+        "",
+        &format!("[cache]\nremote = \"hoard\"\n{rest}"),
+    );
+    fx
+}
+
+fn token_path(fx: &Fixture) -> String {
+    canon(&fx.repo).join(".hoard/token").display().to_string()
+}
+
+#[test]
+fn hooks_get_the_hoard_variables() {
+    let fx = hoard_fixture("");
+    let seen = canon(fx.root.path()).join("teardown-seen");
+    fx.config(
+        &fx.repo,
+        "",
+        &format!(
+            "[cache]\nremote = \"hoard\"\n[setup]\nrun = [\"echo \\\"$TURBO_API $TURBO_TEAM $TURBO_TOKEN\\\" > .hoard-seen\"]\n\
+             [teardown]\nrun = [\"echo \\\"$TURBO_API $TURBO_TEAM $TURBO_TOKEN\\\" > '{}'\"]",
+            seen.display()
+        ),
+    );
+    let out = run(&fx, &["up", "a", "-v"]);
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    assert_eq!(
+        fs::read_to_string(wt(&fx, "a").join(".hoard-seen")).unwrap(),
+        format!("http://127.0.0.1:41234 hoard {CANARY}\n")
+    );
+    assert!(!stdout(&out).contains(CANARY) && !stderr(&out).contains(CANARY));
+    let down = run(&fx, &["down", "a", "-v"]);
+    assert_eq!(code(&down), 0, "{}", stderr(&down));
+    assert_eq!(
+        fs::read_to_string(&seen).unwrap(),
+        format!("http://127.0.0.1:41234 hoard {CANARY}\n")
+    );
+    assert!(!stdout(&down).contains(CANARY) && !stderr(&down).contains(CANARY));
+}
+
+#[test]
+fn rollback_teardown_gets_the_hoard_variables() {
+    let fx = hoard_fixture("");
+    let seen = canon(fx.root.path()).join("rollback-seen");
+    fx.config(
+        &fx.repo,
+        "",
+        &format!(
+            "[cache]\nremote = \"hoard\"\n[setup]\nrun = [\"exit 4\"]\n\
+             [teardown]\nrun = [\"echo \\\"$TURBO_TOKEN\\\" > '{}'\"]",
+            seen.display()
+        ),
+    );
+    let out = run(&fx, &["up", "a"]);
+    assert_eq!(code(&out), 3);
+    assert_eq!(fs::read_to_string(&seen).unwrap(), format!("{CANARY}\n"));
+    assert!(!stdout(&out).contains(CANARY) && !stderr(&out).contains(CANARY));
+}
+
+#[test]
+fn env_sh_prints_a_token_substitution_not_the_token() {
+    let fx = hoard_fixture("");
+    assert_eq!(code(&run(&fx, &["up", "a"])), 0);
+    let out = run(&fx, &["env", "a"]);
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    let text = stdout(&out);
+    assert!(!text.contains(CANARY) && !stderr(&out).contains(CANARY));
+    assert!(
+        text.contains("export TURBO_API='http://127.0.0.1:41234'\n"),
+        "{text}"
+    );
+    assert!(text.contains("export TURBO_TEAM='hoard'\n"), "{text}");
+    let last = text.lines().last().unwrap();
+    assert_eq!(
+        last,
+        format!("export TURBO_TOKEN=\"$(cat '{}')\"", token_path(&fx))
+    );
+    // Sorted block: TURBO_API sits among the other exports, before the token line.
+    let keys: Vec<&str> = text
+        .lines()
+        .filter_map(|l| l.strip_prefix("export "))
+        .filter_map(|l| l.split('=').next())
+        .filter(|k| *k != "TURBO_TOKEN")
+        .collect();
+    let mut sorted = keys.clone();
+    sorted.sort();
+    assert_eq!(keys, sorted);
+
+    // Evaluating the output really yields the token.
+    let file = fx.root.path().join("env.sh");
+    fs::write(&file, &text).unwrap();
+    let eval = std::process::Command::new("sh")
+        .arg("-c")
+        .arg(format!(
+            "eval \"$(cat '{}')\"; printf %s \"$TURBO_TOKEN\"",
+            file.display()
+        ))
+        .output()
+        .unwrap();
+    assert_eq!(String::from_utf8_lossy(&eval.stdout), CANARY);
+}
+
+#[test]
+fn env_fish_reads_the_token_file() {
+    let fx = hoard_fixture("");
+    assert_eq!(code(&run(&fx, &["up", "a"])), 0);
+    let out = run(&fx, &["env", "a", "--format", "fish"]);
+    let text = stdout(&out);
+    assert!(!text.contains(CANARY));
+    assert!(
+        text.contains("set -gx TURBO_API 'http://127.0.0.1:41234'\n"),
+        "{text}"
+    );
+    assert_eq!(
+        text.lines().last().unwrap(),
+        format!("set -gx TURBO_TOKEN (cat '{}')", token_path(&fx))
+    );
+}
+
+#[test]
+fn env_dotenv_and_json_omit_the_token_and_say_so() {
+    let fx = hoard_fixture("");
+    assert_eq!(code(&run(&fx, &["up", "a"])), 0);
+    for format in ["dotenv", "json"] {
+        let out = run(&fx, &["env", "a", "--format", format]);
+        assert_eq!(code(&out), 0, "{}", stderr(&out));
+        let text = stdout(&out);
+        assert!(
+            !text.contains("TURBO_TOKEN") && !text.contains(CANARY),
+            "{text}"
+        );
+        assert!(
+            text.contains("TURBO_API") && text.contains("TURBO_TEAM"),
+            "{text}"
+        );
+        assert_eq!(
+            stderr(&out).trim(),
+            format!(
+                "note: TURBO_TOKEN is not printed; read it from {}",
+                token_path(&fx)
+            )
+        );
+    }
+    let out = run(&fx, &["env", "a", "--format", "json"]);
+    let v: Value = serde_json::from_str(&stdout(&out)).unwrap();
+    assert_eq!(v["TURBO_API"], "http://127.0.0.1:41234");
+    assert_eq!(v["TURBO_TEAM"], "hoard");
+}
+
+#[test]
+fn manifest_and_json_reports_never_contain_hoard_variables_or_the_token() {
+    let fx = hoard_fixture("");
+    let up = run(&fx, &["up", "a", "--json"]);
+    assert_eq!(code(&up), 0, "{}", stderr(&up));
+    let env = run(&fx, &["env", "a", "--json"]);
+    let manifest = fs::read_to_string(fx.repo.join(".agents/worktrees.json")).unwrap();
+    for text in [
+        stdout(&up),
+        stdout(&env),
+        manifest,
+        stderr(&up),
+        stderr(&env),
+    ] {
+        // TURBO_CACHE_DIR is berth's own cache variable; the hoard ones must be absent.
+        for name in ["TURBO_API", "TURBO_TEAM", "TURBO_TOKEN", CANARY] {
+            assert!(!text.contains(name), "{name} in {text}");
+        }
+    }
+}
+
+#[test]
+fn no_server_warns_once_and_exports_nothing() {
+    let fx = hoard_fixture("");
+    fs::remove_file(fx.repo.join(".hoard/port")).unwrap();
+    let up = run(&fx, &["up", "a"]);
+    assert_eq!(code(&up), 0, "{}", stderr(&up));
+    assert_eq!(
+        stderr(&up)
+            .matches("warning: no running hoard server")
+            .count(),
+        1
+    );
+    let out = run(&fx, &["env", "a"]);
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    assert!(!stdout(&out).contains("TURBO_API") && !stdout(&out).contains("TURBO_TEAM"));
+    assert!(!stdout(&out).contains("TURBO_TOKEN"));
+    assert_eq!(
+        stderr(&out)
+            .matches("warning: no running hoard server")
+            .count(),
+        1
+    );
+    assert!(
+        stderr(&out).contains("start hoard serve --storage fs in"),
+        "{}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn bad_port_or_empty_token_counts_as_no_server() {
+    let fx = hoard_fixture("");
+    assert_eq!(code(&run(&fx, &["up", "a"])), 0);
+    write(&fx.repo, ".hoard/port", "not a port");
+    let out = run(&fx, &["env", "a"]);
+    assert!(stderr(&out).contains("warning: no running hoard server"));
+    write(&fx.repo, ".hoard/port", "41234");
+    write(&fx.repo, ".hoard/token", "\n");
+    let out = run(&fx, &["env", "a"]);
+    assert!(stderr(&out).contains("warning: no running hoard server"));
+    assert!(!stdout(&out).contains("TURBO_API") && !stdout(&out).contains("TURBO_TOKEN"));
+}
+
+#[test]
+fn remote_none_prints_no_turbo_and_no_warning() {
+    let fx = Fixture::new();
+    fx.config(&fx.repo, "", "");
+    assert_eq!(code(&run(&fx, &["up", "a"])), 0);
+    let out = run(&fx, &["env", "a"]);
+    assert_eq!(code(&out), 0);
+    assert!(!stdout(&out).contains("TURBO_API") && !stdout(&out).contains("TURBO_TOKEN"));
+    assert!(!stderr(&out).contains("warning"), "{}", stderr(&out));
+}
+
+#[test]
+fn hoard_dir_is_relative_to_main() {
+    let fx = hoard_fixture("hoard_dir = \"state/hoard\"\n");
+    write(&fx.repo, "state/hoard/port", "5555");
+    write(&fx.repo, "state/hoard/token", "tok");
+    assert_eq!(code(&run(&fx, &["up", "a"])), 0);
+    let out = run(&fx, &["env", "a"]);
+    assert!(
+        stdout(&out).contains("TURBO_API='http://127.0.0.1:5555'"),
+        "{}",
+        stdout(&out)
+    );
+    assert!(
+        stdout(&out).contains("state/hoard/token"),
+        "{}",
+        stdout(&out)
+    );
+}

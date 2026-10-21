@@ -194,6 +194,8 @@ pub fn up(ctx: &Ctx, args: &UpArgs) -> Result<Report, BerthError> {
     drop(repo_guard);
     sys::test_pause("after_worktree");
 
+    // Hooks (setup and rollback teardown) get the hoard variables; nothing else does.
+    let hook_env = cache::hook_env(&entry.env, cache::hoard(main, &cfg.cache).as_ref());
     let job = Job {
         repo,
         cfg: &cfg,
@@ -205,6 +207,7 @@ pub fn up(ctx: &Ctx, args: &UpArgs) -> Result<Report, BerthError> {
         branch_existed,
         root_created,
         env: &entry.env,
+        hook_env: &hook_env,
         db: entry.db.clone(),
         db_created: Cell::new(false),
     };
@@ -280,7 +283,7 @@ pub fn up(ctx: &Ctx, args: &UpArgs) -> Result<Report, BerthError> {
     } else {
         let started = Instant::now();
         let timeout = Duration::from_secs(cfg.setup.timeout_secs);
-        match run_hooks("setup", &cfg.setup.run, &path, &entry.env, timeout) {
+        match run_hooks("setup", &cfg.setup.run, &path, &hook_env, timeout) {
             Ok(secs) => SetupStatus {
                 status: "ok".into(),
                 secs,
@@ -707,6 +710,8 @@ struct Job<'a> {
     branch_existed: bool,
     root_created: bool,
     env: &'a BTreeMap<String, String>,
+    /// `env` plus the hoard variables, for hooks only.
+    hook_env: &'a BTreeMap<String, String>,
     db: Option<DbEntry>,
     /// This run created the database (postgres) or started the compose project.
     db_created: Cell<bool>,
@@ -746,7 +751,7 @@ impl Job<'_> {
                 "teardown",
                 &self.cfg.teardown.run,
                 self.path,
-                self.env,
+                self.hook_env,
                 timeout,
             );
         }

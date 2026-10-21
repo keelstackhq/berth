@@ -4,6 +4,7 @@
 use std::path::Path;
 use std::time::Duration;
 
+use crate::cache;
 use crate::cli::DownArgs;
 use crate::config;
 use crate::db;
@@ -106,7 +107,9 @@ pub fn down(ctx: &Ctx, args: &DownArgs) -> Result<Report, BerthError> {
         ));
     } else if registered {
         let timeout = Duration::from_secs(cfg.teardown.timeout_secs);
-        if let Err(err) = run_hooks("teardown", &cfg.teardown.run, &path, &entry.env, timeout) {
+        let hoard = cache::hoard(main, &cfg.cache).filter(|_| !cfg.teardown.run.is_empty());
+        let hook_env = cache::hook_env(&entry.env, hoard.as_ref());
+        if let Err(err) = run_hooks("teardown", &cfg.teardown.run, &path, &hook_env, timeout) {
             if !args.force {
                 return Err(err);
             }

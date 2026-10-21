@@ -184,6 +184,34 @@ fn dotenv_quote(s: &str) -> String {
     out
 }
 
+/// `format_env` plus the hoard remote cache: `TURBO_API` and `TURBO_TEAM` join the sorted
+/// variables; the token never does. `sh` and `fish` end with a line that reads `token_file` when
+/// evaluated; `dotenv` and `json` leave the token out (the caller says so on stderr).
+pub fn format_env_hoard(
+    env: &BTreeMap<String, String>,
+    f: Format,
+    api: &str,
+    token_file: &Path,
+) -> String {
+    let mut env = env.clone();
+    env.insert("TURBO_API".into(), api.to_string());
+    env.insert("TURBO_TEAM".into(), "hoard".into());
+    let mut out = format_env(&env, f);
+    let file = token_file.display().to_string();
+    match f {
+        Format::Sh => out.push_str(&format!(
+            "export TURBO_TOKEN=\"$(cat {})\"\n",
+            sh_quote(&file)
+        )),
+        Format::Fish => out.push_str(&format!(
+            "set -gx TURBO_TOKEN (cat {})\n",
+            fish_quote(&file)
+        )),
+        Format::Dotenv | Format::Json => {}
+    }
+    out
+}
+
 /// One line per key, sorted (the map is ordered), trailing newline.
 pub fn format_env(env: &BTreeMap<String, String>, f: Format) -> String {
     if f == Format::Json {
