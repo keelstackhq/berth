@@ -6,7 +6,7 @@ use std::time::{Duration, Instant};
 
 use berth::BerthError;
 use berth::manifest::{
-    Entry, Manifest, Owner, PortBlock, SetupStatus, State, manifest_path, write_atomic,
+    DbEntry, Entry, Manifest, Owner, PortBlock, SetupStatus, State, manifest_path, write_atomic,
 };
 use berth::registry::{Block, Registry, state_dir_from};
 use berth::sys::{kill_group, pid_alive, rfc3339};
@@ -37,6 +37,7 @@ fn entry(task: &str) -> Entry {
             pid: 4242,
             host: "laptop".into(),
         },
+        db: None,
     }
 }
 
@@ -254,4 +255,51 @@ fn relative_state_paths() {
         Err(BerthError::Config { message, .. }) => assert!(message.contains("absolute")),
         other => panic!("expected Config, got {other:?}"),
     }
+}
+
+#[test]
+fn m1_manifest_without_db_is_byte_identical() {
+    let dir = tempfile::tempdir().unwrap();
+    let main = dir.path();
+    let mut m = Manifest::load(main).unwrap();
+    m.upsert(entry("fix-login"));
+    m.save(main).unwrap();
+    let text = std::fs::read_to_string(manifest_path(main)).unwrap();
+    assert!(!text.contains("\"db\""), "{text}");
+    let loaded = Manifest::load(main).unwrap();
+    assert_eq!(loaded.worktrees[0].db, None);
+    loaded.save(main).unwrap();
+    assert_eq!(std::fs::read_to_string(manifest_path(main)).unwrap(), text);
+}
+
+#[test]
+fn entry_with_db_round_trips() {
+    let dir = tempfile::tempdir().unwrap();
+    let main = dir.path();
+    let mut m = Manifest::load(main).unwrap();
+    let mut e = entry("a");
+    e.db = Some(DbEntry {
+        provider: "postgres".into(),
+        name: "hull_a".into(),
+        created: true,
+        host: Some("localhost".into()),
+        port: Some(5432),
+        user: None,
+    });
+    let mut s = entry("b");
+    s.db = Some(DbEntry {
+        provider: "sqlite".into(),
+        name: "db/dev.sqlite".into(),
+        created: false,
+        host: None,
+        port: None,
+        user: None,
+    });
+    m.upsert(e);
+    m.upsert(s);
+    m.save(main).unwrap();
+    let text = std::fs::read_to_string(manifest_path(main)).unwrap();
+    assert!(text.contains("\"host\": \"localhost\""), "{text}");
+    assert_eq!(text.matches("\"user\"").count(), 0, "{text}");
+    assert_eq!(Manifest::load(main).unwrap(), m);
 }

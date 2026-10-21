@@ -184,6 +184,13 @@ never edits tracked files.
   "owner": { "pid": 4242, "host": "laptop" } } ] }
 ```
 
+With `[db]` an entry also has `"db": { "provider": "postgres", "name": "hull_fix_login",
+"created": true, "host": "localhost", "port": 5432, "user": "dev" }`: `name` is the postgres
+database, the compose project, or the sqlite path relative to the worktree; `created` is set
+right after `createdb` succeeds (berth drops only what it created); `host`/`port`/`user` are
+recorded for postgres only, so `down` works after config edits. Without `[db]` the field is
+absent (an M1 manifest loads and is written back unchanged); never a URL or password.
+
 `state`: `creating` → `ready` | `failed`; `removing`. `copied` lists paths only, never contents or
 hashes. `env` holds only berth-derived and `[env]` values (§7), which are non-secret by rule.
 
@@ -202,7 +209,10 @@ Per user (ports are machine-wide): `$BERTH_STATE_DIR`, else `$XDG_STATE_HOME/ber
   honours it at plan time), `CARGO_TARGET_DIR=<wt>/target` (a shared target dir serialises
   builds on cargo's lock), `TMPDIR=<wt>/.berth/tmp`.
 - `[env]` values with placeholders `{repo}`, `{task}`, `{task_snake}`, `{port.<name>}`,
-  `{port.base}`, `{worktree}`. Unknown placeholder → exit 3.
+  `{port.base}`, `{worktree}`; with `[db]` also `{db.url}` (when a URL exists), `{db.name}`
+  (postgres, compose) and `{db.path}` (sqlite). Unknown placeholder → exit 3.
+- With `[db]`: the URL as `[db].env` (default `DATABASE_URL`; `""` exports none), and
+  `COMPOSE_PROJECT_NAME=<project>` for compose. `[env]` cannot set either (§4).
 
 Formats: `sh` (`export K='v'`, escaped), `fish`, `dotenv`, `json`. Copied files' values are
 never exported: they stay in `.env`, read by the app's own loader.

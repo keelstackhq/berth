@@ -506,6 +506,7 @@ fn create_worktree(
         task,
         ports: &ports,
         extra: &cfg.env,
+        db: None,
     })?;
     let entry = Entry {
         task: task.to_string(),
@@ -525,6 +526,7 @@ fn create_worktree(
             pid: std::process::id(),
             host: sys::hostname(),
         },
+        db: None,
     };
     manifest.upsert(entry.clone());
     manifest.save(main)?;

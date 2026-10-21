@@ -27,6 +27,24 @@ pub struct Entry {
     pub setup: SetupStatus,
     pub created_at: String,
     pub owner: Owner,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub db: Option<DbEntry>,
+}
+
+/// The task's database (spec §6). `name` is the postgres database, the compose project, or the
+/// sqlite path relative to the worktree. Postgres connection settings are recorded so `down`
+/// works after config edits.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct DbEntry {
+    pub provider: String,
+    pub name: String,
+    pub created: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub host: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

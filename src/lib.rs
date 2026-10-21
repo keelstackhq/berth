@@ -3,6 +3,7 @@
 pub mod cli;
 pub mod config;
 pub mod copy;
+pub mod db;
 pub mod env;
 pub mod error;
 pub mod git;
