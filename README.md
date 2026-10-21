@@ -23,6 +23,7 @@ berth down <task> [--force] [--delete-branch] [--json]
 berth ls [--json]
 berth env [<task>] [--format sh|fish|dotenv|json]
 berth doctor [--json]
+berth gc [--dry-run] [--delete-branch] [--json]
 ```
 
 Global flags: `-C <dir>`, `--json`, `--no-color`, `-v` (prints each git command and hook command
@@ -36,8 +37,13 @@ to stderr, never file contents or env values). `<task>` is a slug `^[a-z0-9][a-z
   into `[worktree].base`.
 - `ls` lists worktrees with state, ahead/behind, dirty and listening ports. `env` prints the
   environment of a task, or of the worktree you are in: `eval "$(berth env)"`.
-- `doctor` checks git, config, copy rules, root, port registry, manifest and owners.
+- `doctor` checks git, config, copy rules, root, port registry, manifest and owners, plus the
+  database tools, the sqlite template, turbo seeding and the hoard server when configured.
   `ls`, `env` and `doctor` take no locks and write nothing.
+- `gc` runs `down` for every `ready` task whose worktree is clean and whose branch has commits
+  that are all merged into `[worktree].base` (fast-forward, merge, or, with git 2.38+, squash or
+  rebase). Fresh, dirty and unmerged tasks are kept. berth never fetches: `git pull` first.
+  `--dry-run` only reports.
 
 Worktrees default to a sibling directory `../<repo>.berth/<task>`.
 
@@ -53,7 +59,51 @@ version = 1
 [env]       # non-secret values; {repo} {task} {task_snake} {port.<name>} {port.base} {worktree}
 [setup]     # run = ["pnpm install --frozen-lockfile"], timeout_secs = 900
 [teardown]  # same keys as [setup]; runs before removal
+[db]        # provider = "sqlite" | "postgres" | "compose"; see below
+[cache]     # turbo_seed = "off" | "link" | "copy", remote = "none" | "hoard", hoard_dir = ".hoard"
 ```
+
+### Databases (`[db]`)
+
+Each task gets its own database; the URL goes to `[db].env` (default `DATABASE_URL`, `""` for
+none). `up` creates it after copying files and before `[setup]`, so setup can run migrations;
+`down` (and `gc`) drop it after `[teardown]`.
+
+```toml
+[db]                        # sqlite: copy a template file into the worktree
+provider = "sqlite"
+template = "db/dev.sqlite"  # in the main checkout; path = "..." to put it elsewhere (must be gitignored)
+
+[db]                        # postgres: createdb --template on a local server
+provider = "postgres"
+template = "app_dev"        # optional; name = "{repo}_{task_snake}" by default (max 63, [a-z0-9_])
+host = "localhost"          # port = 5432, user = "..." (optional)
+
+[db]                        # compose: one compose project per task
+provider = "compose"
+services = ["db"]           # docker compose up --detach --wait; project = "<repo>-<task>"
+url = "postgres://postgres@localhost:{port.db}/app"   # optional
+```
+
+- berth never sees a password: `createdb`/`dropdb` run with `--no-password` and read
+  `PGPASSWORD` or `~/.pgpass` themselves. A template with open sessions makes `createdb` fail
+  after 5 s; stop the main dev server first.
+- berth drops only a database it created (recorded in the manifest). An existing database of the
+  same name makes `up` fail. `down --force` also ends open sessions (`dropdb --force`).
+- compose gets `COMPOSE_PROJECT_NAME` and the `<NAME>_PORT` variables, so a compose file maps
+  ports with `${DB_PORT:-5432}:5432`. `down` runs `docker compose down --volumes`.
+- sqlite: a non-empty `<template>-wal` is an error (checkpoint it or stop the app).
+
+### Caches (`[cache]`)
+
+- `turbo_seed = "link"` hard-links the main checkout's `.turbo/cache` entries into the new
+  worktree (turbo writes entries by temp file and rename, so the main copy never changes;
+  `copy` copies instead). `.turbo/` must be gitignored.
+- `remote = "hoard"` points worktrees at a `hoard serve --storage fs` you start in the main
+  checkout (it writes `.hoard/port` and `.hoard/token`). `berth env` exports `TURBO_API`,
+  `TURBO_TEAM` and `TURBO_TOKEN="$(cat <token file>)"`, so the token itself is never printed
+  (`--format dotenv|json` leave it out); hooks get the real value. Nothing about hoard is stored
+  in the manifest.
 
 `berth env` also sets `BERTH_TASK`, `BERTH_ROOT`, `BERTH_WORKTREE`, `BERTH_PORT_BASE`,
 `BERTH_PORT_COUNT`, `PORT`, `TURBO_CACHE_DIR`, `VITE_CACHE_PATH`, `CARGO_TARGET_DIR` and `TMPDIR`
@@ -61,8 +111,9 @@ version = 1
 
 ## Exit codes
 
-`0` ok · `1` refused or drift · `2` usage · `3` config or environment error (the message says how
-to fix it). With `--json`, stdout is exactly one object
+`0` ok · `1` refused or drift (also: a `[db]` sqlite target git does not ignore, `gc` when a
+`down` refused) · `2` usage · `3` config or environment error (the message says how to fix it;
+also: missing `createdb`/`dropdb`/`docker`, a failed database step). With `--json`, stdout is exactly one object
 `{version, command, ok, exit_code, items, worktrees}`; logs and hook output go to stderr.
 
 ## Environment variables

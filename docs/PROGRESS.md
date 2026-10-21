@@ -3,7 +3,8 @@
 ## Status
 
 Milestone 1 merged to `main` (PR #1, 2026-10-18; decisions channel in PR #2, 2026-10-21). Milestone 2
-(services) in progress, plan `docs/superpowers/plans/2026-10-21-berth-m2.md`: Tasks 1 (`[db]`, `[cache]` config), 2 (database plan, manifest `db` field, env) 3 (squash-aware `git::is_merged`) 4 (sqlite, postgres, compose providers) 5 (databases in `up` and `down`) 6 (turbo cache seeding) 7 (hoard remote-cache export) 8 (`berth gc`) 9 (doctor checks) and 10 (secret canaries) done; Task 11 next.
+(services) complete pending whole-branch review, plan `docs/superpowers/plans/2026-10-21-berth-m2.md`:
+Tasks 1-11 done.
 
 ## Done
 
@@ -33,6 +34,7 @@ Milestone 1 merged to `main` (PR #1, 2026-10-18; decisions channel in PR #2, 202
 - 2026-10-21 · M2 Task 8 · `berth gc [--dry-run] [--delete-branch]` (lock-free scan, each removal through `down_task`, which `down` now wraps unchanged); spec §3, §11 · `cargo test --test cli_gc` 8/8 (merged, squash-merged, open, fresh, dirty, failed kept; failing teardown exit 3), `cli_down` snapshots unchanged, fmt, clippy, `cargo test --locked` green
 - 2026-10-21 · M2 Task 9 · `doctor` checks `[db]` tools, sqlite template/wal/target, unrecorded postgres databases, turbo seed ignore, hoard server (`cache::hoard_quiet`); lock-free, never runs a db tool; spec §11 · `cargo test --test cli_doctor` 22/22, fmt, clippy, `cargo test --locked` green
 - 2026-10-21 · M2 Task 10 · secret canaries for sqlite template, hoard token and `.env` across `up` (json, table, `-v`), `env` x4, `ls`, `doctor`, `gc --dry-run`, `down`, manifest and `ports.json`; no leak found · `cargo test --test secrets` 2/2, fmt, clippy, `cargo test --locked` green
+- 2026-10-21 · M2 Task 11 · dogfood on example-app + README · `up a`/`up b` in parallel 1.3 s wall, ports 24090-24099 and 27760-27769, 63 turbo entries hard-linked into each, postgres `example_app_a`/`_b` from template `app_dev` (PG 16.15, rows copied); `pnpm run check && pnpm run build` in both at once FULL TURBO 1.7 s (main checkout cold 12.6 s), main `.turbo/cache` unchanged; hoard (built from source) exported live, an edit in `a` uploaded 4 artifacts and `b` hit them 18/18; `gc --dry-run`/`gc` removed the merged `a` (DB dropped) and kept fresh `b`; `doctor` 0.1 s, exit 0; after `down b` worktree list as before (main moved by the local merge), `ports.json` `"blocks": []`, no task DBs; sqlite and compose (Docker 29.9.1, real containers and volumes removed) smoke-tested; spec §17 updated. Container note: pnpm 12's self-installed copy lacked its native binary until its `install.js` ran (environment, not berth)
 
 ## Blocked
 

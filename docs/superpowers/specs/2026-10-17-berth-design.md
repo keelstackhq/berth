@@ -485,6 +485,24 @@ All fetching-free; versions are **not** stated here and are pinned exactly in th
   `node_modules/.vite` appears. Whether `VITE_CACHE_PATH` is honoured by `vp run` stays unverified.
   Two worktrees ran `pnpm run ci` (21/21 tasks, exit 0) and two `vp dev` servers on their own
   `WEB_PORT` at the same time.
+- Verified 2026-10-21 (M2 plan and dogfood): turbo `crates/turborepo-cache/src/fs.rs` at `v2.11.8`
+  and `main` writes every cache file (archive, `-meta.json`, `-manifest.json`) to a temp file and
+  renames it; eviction unlinks. No entry is rewritten in place, so hard-linked seeds are safe.
+  hoard (`ed8074a`): `hoard serve` writes `./.hoard/port` and `./.hoard/token` (random unless
+  `--port`/`--token`); `hoard env` exports `TURBO_API=http://127.0.0.1:<port>`, `TURBO_TOKEN`,
+  `TURBO_TEAM=hoard`. PostgreSQL 16.15: `createdb --template` waits 5 s for template sessions, then
+  fails; names over 63 bytes are silently truncated; `dropdb --if-exists` is idempotent; `dropdb
+  --force` ends sessions; two concurrent `createdb` from one template both succeed. Docker Compose
+  v5.6.0: `--project-name P down --volumes --remove-orphans` works without the compose file and is
+  idempotent; `up --detach --wait` waits for health; project names `^[a-z0-9][a-z0-9_-]*$`.
+  git 2.38+ `merge-tree --write-tree` is used for squash-aware "merged".
+- M2 dogfood 2026-10-21 (example-app, turbo 2.11.8, pnpm 12.11.2, PG 16.15, hoard from source):
+  `up a`/`up b` at once, 1.3 s wall, 63 cache entries hard-linked into each, two databases from
+  one template; `pnpm run check && pnpm run build` FULL TURBO in both at once (1.7 s vs 12.6 s cold
+  in the main checkout); main `.turbo/cache` unchanged; an edit run in `a` uploaded 4 artifacts to
+  hoard and `b` then hit them (18/18 cached); `gc` removed the merged task (database dropped) and
+  kept the fresh one; after `down b` no task databases, no port blocks. sqlite and compose
+  (Docker 29.9.1) smoke-tested on a scratch repo.
 - Claude Code: `.worktreeinclude` format, worktree-create/remove hook names and payload, and the
   SessionStart env-file mechanism; Codex equivalents if any.
 
@@ -496,7 +514,7 @@ All fetching-free; versions are **not** stated here and are pinned exactly in th
 2. **M2 — services** — DB providers behind `[db]`: `sqlite` (copy a template file), `postgres`
    (`createdb -T <template>` / `dropdb`, local server), `compose` (per-task `COMPOSE_PROJECT_NAME`
    and port mapping); hoard remote-cache export; turbo cache seeding; `berth gc` (remove `ready`
-   tasks whose branch is merged and worktree clean).
+   tasks whose branch is merged and worktree clean). Done 2026-10-21, plan `2026-10-21-berth-m2.md`.
 3. **M3 — distribution and integration** — release via hoist, npm launcher, Windows; hull renders
    `berth.toml`, skill, hooks and statusline segment; D-00x in `keelstackhq/decisions`.
 4. **Later, with evidence** — hosted DB branches (network + token; maybe hoist's), cross-agent
