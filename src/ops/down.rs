@@ -73,7 +73,7 @@ pub fn down(ctx: &Ctx, args: &DownArgs) -> Result<Report, BerthError> {
     let branch_present = git::branch_exists(main, &entry.branch)?;
     if args.delete_branch && branch_present {
         let base = git::resolve_commit(main, &cfg.worktree.base)?;
-        if !git::is_ancestor(main, &entry.branch, &base)? {
+        if !git::is_merged(main, &entry.branch, &base)? {
             refusals.push(Item::new(
                 "branch",
                 &entry.branch,
@@ -156,7 +156,7 @@ pub fn down(ctx: &Ctx, args: &DownArgs) -> Result<Report, BerthError> {
     if args.delete_branch && branch_present {
         // The teardown hook may have committed since the check in step 4: never lose commits.
         let merged = git::resolve_commit(main, &cfg.worktree.base)
-            .and_then(|base| git::is_ancestor(main, &entry.branch, &base))
+            .and_then(|base| git::is_merged(main, &entry.branch, &base))
             .map_err(|err| {
                 BerthError::Env(format!(
                     "{err}; the worktree and ports were already removed and branch {} was kept; \

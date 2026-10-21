@@ -361,13 +361,39 @@ fn unregistered_directory_is_left_alone() {
 }
 
 #[test]
+fn delete_branch_removes_a_squash_merged_branch() {
+    if berth::git::version().unwrap() < (2, 38) {
+        eprintln!("git < 2.38: squash-merge detection is unavailable; test skipped");
+        return;
+    }
+    let fx = Fixture::new();
+    fx.config(&fx.repo, "", "");
+    assert_eq!(code(&up(&fx, &["a"])), 0);
+    let path = wt(&fx, "a");
+    for n in ["w1.txt", "w2.txt"] {
+        write(&path, n, n);
+        git(&path, &["add", n]);
+        git(&path, &["commit", "-q", "-m", n]);
+    }
+    git(&fx.repo, &["merge", "-q", "--squash", "berth/a"]);
+    git(&fx.repo, &["commit", "-q", "-m", "squash"]);
+
+    let out = down(&fx, &["a", "--delete-branch", "--json"]);
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    assert_eq!(find(&json(&out), "branch").unwrap()["action"], "remove");
+    assert!(!branch_exists(&fx.repo, "berth/a"));
+    assert!(!path.exists());
+}
+
+#[test]
 fn teardown_commit_keeps_branch_despite_delete_branch() {
-    // The branch was merged when down checked, but the teardown hook committed on it.
+    // The branch was merged when down checked, but the teardown hook committed a change on it
+    // (an empty commit loses nothing, so it would not count).
     let fx = Fixture::new();
     fx.config(
         &fx.repo,
         "",
-        "[teardown]\nrun = [\"git commit --allow-empty -q -m late\"]",
+        "[teardown]\nrun = [\"echo late > late.txt && git add late.txt && git commit -q -m late\"]",
     );
     assert_eq!(code(&up(&fx, &["a"])), 0);
     let out = down(&fx, &["a", "--delete-branch", "--json"]);

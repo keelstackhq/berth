@@ -124,7 +124,13 @@ fn run_bool(dir: &Path, args: &[&str]) -> Result<bool, BerthError> {
     }
 }
 
-pub fn check_version() -> Result<(u32, u32), BerthError> {
+/// The installed git's (major, minor), without the minimum check.
+pub fn version() -> Result<(u32, u32), BerthError> {
+    raw_version().map(|(major, minor, _)| (major, minor))
+}
+
+/// (major, minor, the version text git printed, e.g. `2.43.0`).
+fn raw_version() -> Result<(u32, u32, String), BerthError> {
     vlog("git --version");
     let out = Command::new("git")
         .arg("--version")
@@ -147,6 +153,11 @@ pub fn check_version() -> Result<(u32, u32), BerthError> {
             "git 2.36 or newer is required (could not read version from `{line}`)"
         )));
     };
+    Ok((major, minor, version.to_string()))
+}
+
+pub fn check_version() -> Result<(u32, u32), BerthError> {
+    let (major, minor, version) = raw_version()?;
     if (major, minor) < MIN_VERSION {
         return Err(BerthError::Env(format!(
             "git 2.36 or newer is required (found {version})"
@@ -434,6 +445,40 @@ pub fn is_ancestor(main: &Path, a: &str, b: &str) -> Result<bool, BerthError> {
         main,
         &["merge-base", "--is-ancestor", "--end-of-options", a, b],
     )
+}
+
+/// Whether every change of `branch` is already in `base`: an ancestor, or (git >= 2.38) a
+/// merge that yields base's own tree, which also covers squash and rebase merges. Compares with
+/// the local refs; nothing is fetched.
+pub fn is_merged(main: &Path, branch: &str, base: &str) -> Result<bool, BerthError> {
+    // Full SHAs from here on, so a ref name can never act as an option.
+    let branch_sha = resolve_commit(main, branch)?;
+    let base_sha = resolve_commit(main, base)?;
+    if is_ancestor(main, &branch_sha, &base_sha)? {
+        return Ok(true);
+    }
+    if version()? < (2, 38) {
+        return Ok(false);
+    }
+    let args = [
+        OsStr::new("merge-tree"),
+        OsStr::new("--write-tree"),
+        OsStr::new("--end-of-options"),
+        OsStr::new(&base_sha),
+        OsStr::new(&branch_sha),
+    ];
+    let out = exec(main, &args, None)?;
+    match out.status.code() {
+        Some(0) => {}
+        Some(1) => return Ok(false), // conflicts
+        _ => return Err(failure(&args, &out)),
+    }
+    let merged_tree = text(&out.stdout).lines().next().unwrap_or("").to_string();
+    let base_tree = text(&run(
+        main,
+        &["rev-parse", "--verify", &format!("{base_sha}^{{tree}}")],
+    )?);
+    Ok(!merged_tree.is_empty() && merged_tree == base_tree)
 }
 
 pub fn merge_base(main: &Path, a: &str, b: &str) -> Result<String, BerthError> {

@@ -300,7 +300,11 @@ and `doctor` as `drift: interrupted`; `down` cleans it.
 **down**: repo lock → `state: removing`. Refuse (exit 1, nothing changed) when the worktree has
 staged or unstaged changes, or untracked files git does not ignore, unless `--force`. Copied files
 are gitignored by rule (§8.3), so they never block. Commits are safe because the branch is kept;
-`--delete-branch` deletes it only if it is merged into `base` (else refused, exit 1). Then
+`--delete-branch` deletes it only if it is merged into `base` (else refused, exit 1). "Merged"
+means the branch is an ancestor of `base`, or, with git >= 2.38, `git merge-tree --write-tree
+<base> <branch>` succeeds and yields base's own tree, i.e. every change of the branch is already
+in `base` (squash and rebase merges). berth never fetches: it compares with the local `base`, so
+`git pull` first; with older git only the ancestor test applies. Then
 teardown hook, `git worktree remove` (`--force` passed through only with berth's `--force`),
 `git worktree prune`, release ports, drop the manifest entry.
 `down` refuses (exit 1) while a live process is still creating the task, and `--delete-branch`

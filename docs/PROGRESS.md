@@ -3,7 +3,7 @@
 ## Status
 
 Milestone 1 merged to `main` (PR #1, 2026-10-18; decisions channel in PR #2, 2026-10-21). Milestone 2
-(services) in progress, plan `docs/superpowers/plans/2026-10-21-berth-m2.md`: Tasks 1 (`[db]`, `[cache]` config) and 2 (database plan, manifest `db` field, env) done; Task 3 next.
+(services) in progress, plan `docs/superpowers/plans/2026-10-21-berth-m2.md`: Tasks 1 (`[db]`, `[cache]` config), 2 (database plan, manifest `db` field, env) and 3 (squash-aware `git::is_merged`) done; Task 4 next.
 
 ## Done
 
@@ -25,6 +25,7 @@ Milestone 1 merged to `main` (PR #1, 2026-10-18; decisions channel in PR #2, 202
 - 2026-10-17 · Final review fixes · `down --force` passes a `creating` owner on another host (same-host live pid still refuses; messages name `berth down --force <task>`); usage errors with `--json` print one Report (exit 2); `up` refuses a tracked `.agents/worktrees.json` (exit 3); post-setup lock timeout says `berth down <task>`; CI actions pinned to SHAs; spec §8/§11 + README · fmt, clippy, `cargo test --locked` all green
 - 2026-10-21 · M2 Task 1 · `[db]` and `[cache]` in `berth.toml` (`DbCfg`, `Provider`, `CacheCfg`, `Remote`, `Seed`, validation, spec §4) · `cargo test --test config` 20/20, fmt, clippy, `cargo test --locked` green
 - 2026-10-21 · M2 Task 2 · database plan (`src/db.rs` `resolve`/`entry`), `Entry.db`, `env::expand_with`, `{db.*}` placeholders, `DATABASE_URL`/`COMPOSE_PROJECT_NAME`; spec §6, §7 · `cargo test --test db` 10/10, `env` 12/12, `state` 14/14, fmt, clippy, `cargo test --locked` green
+- 2026-10-21 · M2 Task 3 · `git::version`, squash-aware `git::is_merged` (ancestor, or git >= 2.38 `merge-tree --write-tree` yields base's tree), used by `down --delete-branch` pre-check and re-check; spec §11 · `cargo test --test git` 25/25, `cli_down` 14/14, fmt, clippy, `cargo test --locked` green
 
 ## Blocked
 
