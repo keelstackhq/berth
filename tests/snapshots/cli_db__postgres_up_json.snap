@@ -28,7 +28,7 @@ expression: text
     },
     {
       "kind": "db",
-      "key": "repo_a",
+      "key": "repo_[H]_a",
       "action": "create",
       "reason": "created (empty)"
     },
@@ -82,7 +82,7 @@ expression: text
         "BERTH_TASK": "a",
         "BERTH_WORKTREE": "[ROOT]/repo.berth/a",
         "CARGO_TARGET_DIR": "[ROOT]/repo.berth/a/target",
-        "DATABASE_URL": "postgres://localhost:5432/repo_a",
+        "DATABASE_URL": "postgres://localhost:5432/repo_[H]_a",
         "DB_PORT": "[PORT]",
         "PORT": "[PORT]",
         "STORYBOOK_PORT": "[PORT]",
@@ -103,7 +103,7 @@ expression: text
       },
       "db": {
         "provider": "postgres",
-        "name": "repo_a",
+        "name": "repo_[H]_a",
         "created": true,
         "host": "[HOST]",
         "port": 5432

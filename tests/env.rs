@@ -167,9 +167,22 @@ fn json_is_one_sorted_object() {
     assert_eq!(v["E"], "two\nlines");
 }
 
+/// The default-name hash for the fixed main path `/main` used by `plan`.
+fn h() -> String {
+    format!("{:016x}", berth::ports::fnv1a64(b"/main"))[..6].to_string()
+}
+
 fn plan(toml_src: &str, repo: &str, task: &str, wt: &str) -> DbPlan {
     let cfg: DbCfg = toml::from_str(toml_src).unwrap();
-    resolve(&cfg, repo, task, Path::new(wt), &block()).unwrap()
+    resolve(
+        &cfg,
+        repo,
+        Path::new("/main"),
+        task,
+        Path::new(wt),
+        &block(),
+    )
+    .unwrap()
 }
 
 fn env_with(
@@ -193,7 +206,7 @@ fn db_url_and_compose_project_are_exported() {
     let env = env_with(&pg, &BTreeMap::new()).unwrap();
     assert_eq!(
         env["DATABASE_URL"],
-        "postgres://localhost:5432/hull_fix_login"
+        format!("postgres://localhost:5432/hull_{}_fix_login", h())
     );
     assert!(!env.contains_key("COMPOSE_PROJECT_NAME"));
 
@@ -204,10 +217,13 @@ fn db_url_and_compose_project_are_exported() {
         "/w",
     );
     let env = env_with(&c, &BTreeMap::new()).unwrap();
-    assert_eq!(env["COMPOSE_PROJECT_NAME"], "hull-fix-login");
+    assert_eq!(
+        env["COMPOSE_PROJECT_NAME"],
+        format!("hull-{}-fix-login", h())
+    );
     assert_eq!(
         env["DATABASE_URL"],
-        "postgres://u@localhost:21341/hull-fix-login"
+        format!("postgres://u@localhost:21341/hull-{}-fix-login", h())
     );
 
     let c = plan("provider = \"compose\"", "hull", "fix-login", "/w");
@@ -230,8 +246,11 @@ fn env_values_use_db_placeholders() {
         ("B".to_string(), "n={db.name}".to_string()),
     ]);
     let env = env_with(&pg, &extra).unwrap();
-    assert_eq!(env["A"], "postgres://localhost:5432/hull_fix_login");
-    assert_eq!(env["B"], "n=hull_fix_login");
+    assert_eq!(
+        env["A"],
+        format!("postgres://localhost:5432/hull_{}_fix_login", h())
+    );
+    assert_eq!(env["B"], format!("n=hull_{}_fix_login", h()));
 
     let sq = plan(
         "provider = \"sqlite\"\ntemplate = \"db/dev.sqlite\"",

@@ -76,12 +76,12 @@ template = "db/dev.sqlite"  # in the main checkout; path = "..." to put it elsew
 
 [db]                        # postgres: createdb --template on a local server
 provider = "postgres"
-template = "app_dev"        # optional; name = "{repo}_{task_snake}" by default (max 63, [a-z0-9_])
+template = "app_dev"        # optional; name = "<repo>_<h>_<task_snake>" by default (max 63, [a-z0-9_]; <h> = 6 hex chars of the checkout path)
 host = "localhost"          # port = 5432, user = "..." (optional)
 
 [db]                        # compose: one compose project per task
 provider = "compose"
-services = ["db"]           # docker compose up --detach --wait; project = "<repo>-<task>"
+services = ["db"]           # docker compose up --detach --wait; project = "<repo>-<h>-<task>" by default (<h> = 6 hex chars of the checkout path)
 url = "postgres://postgres@localhost:{port.db}/app"   # optional
 ```
 

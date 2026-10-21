@@ -25,7 +25,19 @@ fn cfg(src: &str) -> DbCfg {
 }
 
 fn plan(src: &str, repo: &str, task: &str) -> Result<berth::db::DbPlan, BerthError> {
-    resolve(&cfg(src), repo, task, Path::new("/wt"), &ports())
+    resolve(
+        &cfg(src),
+        repo,
+        Path::new("/main"),
+        task,
+        Path::new("/wt"),
+        &ports(),
+    )
+}
+
+/// First 6 hex chars of FNV-1a over the path bytes (the default-name hash).
+fn h(path: &str) -> String {
+    format!("{:016x}", berth::ports::fnv1a64(path.as_bytes()))[..6].to_string()
 }
 
 fn config_msg(err: BerthError) -> String {
@@ -41,15 +53,19 @@ fn config_msg(err: BerthError) -> String {
 #[test]
 fn postgres_default_name_and_url() {
     assert_eq!(
-        default_pg_name("My-App.v2", "fix-login"),
-        "my_app_v2_fix_login"
+        default_pg_name("My-App.v2", Path::new("/main"), "fix-login"),
+        format!("my_app_v2_{}_fix_login", h("/main"))
     );
     let p = plan("provider = \"postgres\"", "My-App.v2", "fix-login").unwrap();
     assert_eq!(p.provider, Provider::Postgres);
-    assert_eq!(p.name, "my_app_v2_fix_login");
+    assert_eq!(p.name, format!("my_app_v2_{}_fix_login", h("/main")));
     assert_eq!(
         p.url.as_deref(),
-        Some("postgres://localhost:5432/my_app_v2_fix_login")
+        Some(format!(
+            "postgres://localhost:5432/my_app_v2_{}_fix_login",
+            h("/main")
+        ))
+        .as_deref()
     );
     assert_eq!(p.env_var.as_deref(), Some("DATABASE_URL"));
     assert_eq!(p.abs_path, None);
@@ -63,7 +79,10 @@ fn postgres_user_and_port() {
         "t",
     )
     .unwrap();
-    assert_eq!(p.url.as_deref(), Some("postgres://dev@db.local:5433/app_t"));
+    assert_eq!(
+        p.url.as_deref(),
+        Some(format!("postgres://dev@db.local:5433/app_{}_t", h("/main"))).as_deref()
+    );
 }
 
 #[test]
@@ -97,9 +116,9 @@ fn postgres_bad_names_name_the_key() {
         )
         .is_ok()
     );
-    // A long derived default fails the same way.
-    let msg = config_msg(plan("provider = \"postgres\"", &"r".repeat(70), "t").unwrap_err());
-    assert!(msg.contains("[db].name"), "{msg}");
+    // A long derived default is cut to fit instead of failing.
+    let p = plan("provider = \"postgres\"", &"r".repeat(70), "t").unwrap();
+    assert!(p.name.len() <= 63, "{}", p.name);
 }
 
 #[test]
@@ -137,10 +156,17 @@ fn sqlite_plan() {
 
 #[test]
 fn compose_project_and_url() {
-    assert_eq!(default_project("My Repo", "fix-login"), "my-repo-fix-login");
-    assert_eq!(default_project("_.Repo", "t"), "repo-t");
+    let m = Path::new("/main");
+    assert_eq!(
+        default_project("My Repo", m, "fix-login"),
+        format!("my-repo-{}-fix-login", h("/main"))
+    );
+    assert_eq!(
+        default_project("_.Repo", m, "t"),
+        format!("repo-{}-t", h("/main"))
+    );
     let p = plan("provider = \"compose\"", "My Repo", "fix").unwrap();
-    assert_eq!(p.name, "my-repo-fix");
+    assert_eq!(p.name, format!("my-repo-{}-fix", h("/main")));
     assert_eq!(p.url, None);
     let p = plan(
         "provider = \"compose\"\nurl = \"postgres://postgres@localhost:{port.db}/{db.name}\"",
@@ -150,7 +176,11 @@ fn compose_project_and_url() {
     .unwrap();
     assert_eq!(
         p.url.as_deref(),
-        Some("postgres://postgres@localhost:21343/my-repo-fix")
+        Some(format!(
+            "postgres://postgres@localhost:21343/my-repo-{}-fix",
+            h("/main")
+        ))
+        .as_deref()
     );
 }
 
@@ -181,17 +211,33 @@ fn unknown_url_placeholder_is_config_error() {
 #[test]
 fn entry_records_postgres_connection_only() {
     let c = cfg("provider = \"postgres\"\nuser = \"dev\"");
-    let p = resolve(&c, "app", "t", Path::new("/wt"), &ports()).unwrap();
+    let p = resolve(
+        &c,
+        "app",
+        Path::new("/main"),
+        "t",
+        Path::new("/wt"),
+        &ports(),
+    )
+    .unwrap();
     let e = entry(&p, &c);
     assert_eq!(e.provider, "postgres");
-    assert_eq!(e.name, "app_t");
+    assert_eq!(e.name, format!("app_{}_t", h("/main")));
     assert!(!e.created);
     assert_eq!(
         (e.host.as_deref(), e.port, e.user.as_deref()),
         (Some("localhost"), Some(5432), Some("dev"))
     );
     let c = cfg("provider = \"compose\"");
-    let p = resolve(&c, "app", "t", Path::new("/wt"), &ports()).unwrap();
+    let p = resolve(
+        &c,
+        "app",
+        Path::new("/main"),
+        "t",
+        Path::new("/wt"),
+        &ports(),
+    )
+    .unwrap();
     let e = entry(&p, &c);
     assert_eq!(
         (e.provider.as_str(), e.host, e.port, e.user),
@@ -221,7 +267,7 @@ fn env_of(fx: &Fixture) -> BTreeMap<String, String> {
 }
 
 fn pg_plan(c: &DbCfg, repo: &str) -> berth::db::DbPlan {
-    resolve(c, repo, "a", Path::new("/wt"), &ports()).unwrap()
+    resolve(c, repo, Path::new("/main"), "a", Path::new("/wt"), &ports()).unwrap()
 }
 
 #[test]
@@ -233,12 +279,14 @@ fn createdb_argv_with_template() {
     let item = create(&fx.repo, &fx.tmp, &c, &plan, &env_of(&fx)).unwrap();
     assert_eq!(item.action, Action::Create);
     assert_eq!(item.kind, "db");
-    assert_eq!(item.key, "repo_a");
+    assert_eq!(item.key, plan.name);
     assert_eq!(item.reason, "created from template app_dev");
     let log = log_of(&fx, "createdb");
     assert!(
-        log.trim_end()
-            .ends_with("--no-password --host localhost --port 5432 --template app_dev -- repo_a"),
+        log.trim_end().ends_with(&format!(
+            "--no-password --host localhost --port 5432 --template app_dev -- {}",
+            plan.name
+        )),
         "{log}"
     );
     assert!(
@@ -256,8 +304,10 @@ fn createdb_with_user_without_template() {
     assert_eq!(item.reason, "created (empty)");
     let log = log_of(&fx, "createdb");
     assert!(
-        log.trim_end()
-            .ends_with("--no-password --host db.local --port 5433 --username dev -- repo_a"),
+        log.trim_end().ends_with(&format!(
+            "--no-password --host db.local --port 5433 --username dev -- {}",
+            pg_plan(&c, "repo").name
+        )),
         "{log}"
     );
 }
@@ -345,7 +395,10 @@ fn dropdb_skips_a_database_berth_did_not_create() {
         .unwrap()
         .unwrap();
     assert_eq!(item.action, Action::Skipped);
-    assert_eq!(item.reason, "not created by berth; left in place");
+    assert_eq!(
+        item.reason,
+        "not created by berth; left in place; drop it with dropdb repo_a if it is a leftover"
+    );
     assert_eq!(log_of(&fx, "dropdb"), "");
 }
 
@@ -362,15 +415,23 @@ fn compose_up_and_down() {
     let fx = Fixture::new();
     logging(&fx, "docker", "");
     let c = cfg("provider = \"compose\"\nservices = [\"db\", \"redis\"]");
-    let plan = resolve(&c, "My App", "fix-it", Path::new("/wt"), &ports()).unwrap();
-    assert_eq!(plan.name, "my-app-fix-it");
+    let plan = resolve(
+        &c,
+        "My App",
+        Path::new("/main"),
+        "fix-it",
+        Path::new("/wt"),
+        &ports(),
+    )
+    .unwrap();
+    assert_eq!(plan.name, format!("my-app-{}-fix-it", h("/main")));
     let wt = fx.tmp.canonicalize().unwrap();
     let item = create(&fx.repo, &wt, &c, &plan, &env_of(&fx)).unwrap();
     assert_eq!(
         (item.action, item.reason.as_str()),
         (Action::Create, "compose up")
     );
-    assert_eq!(item.key, "my-app-fix-it");
+    assert_eq!(item.key, plan.name);
     let e = DbEntry {
         provider: "compose".into(),
         name: plan.name.clone(),
@@ -391,11 +452,17 @@ fn compose_up_and_down() {
     let cwd = wt.display();
     assert_eq!(
         lines[0],
-        format!("{cwd}: compose --project-name my-app-fix-it up --detach --wait db redis")
+        format!(
+            "{cwd}: compose --project-name {} up --detach --wait db redis",
+            plan.name
+        )
     );
     assert_eq!(
         lines[1],
-        format!("{cwd}: compose --project-name my-app-fix-it down --volumes --remove-orphans")
+        format!(
+            "{cwd}: compose --project-name {} down --volumes --remove-orphans",
+            plan.name
+        )
     );
 }
 
@@ -405,11 +472,10 @@ fn compose_without_services_runs_all() {
     logging(&fx, "docker", "");
     let c = cfg("provider = \"compose\"");
     create(&fx.repo, &fx.tmp, &c, &pg_plan(&c, "repo"), &env_of(&fx)).unwrap();
-    assert!(
-        log_of(&fx, "docker")
-            .trim_end()
-            .ends_with("compose --project-name repo-a up --detach --wait")
-    );
+    assert!(log_of(&fx, "docker").trim_end().ends_with(&format!(
+        "compose --project-name {} up --detach --wait",
+        pg_plan(&c, "repo").name
+    )));
 }
 
 #[test]
@@ -428,7 +494,7 @@ fn sqlite_fx(c: &DbCfg) -> (Fixture, berth::db::DbPlan, std::path::PathBuf) {
     common::git(&fx.repo, &["commit", "-q", "-m", "ignore db"]);
     let wt = fx.root.path().join("wt");
     fs::create_dir_all(&wt).unwrap();
-    let plan = resolve(c, "repo", "a", &wt, &ports()).unwrap();
+    let plan = resolve(c, "repo", Path::new("/main"), "a", &wt, &ports()).unwrap();
     (fx, plan, wt)
 }
 
@@ -724,8 +790,11 @@ fn real_postgres_create_and_drop() {
     let c = cfg(&format!(
         "provider = \"postgres\"\ntemplate = \"app_dev\"\nuser = \"postgres\"\nhost = \"127.0.0.1\"\nport = {port}"
     ));
-    let plan = resolve(&c, "repo", "a", &fx.repo, &ports()).unwrap();
-    assert_eq!(plan.name, "repo_a");
+    let plan = resolve(&c, "repo", &fx.repo, "a", &fx.repo, &ports()).unwrap();
+    assert_eq!(
+        plan.name,
+        format!("repo_{}_a", h(fx.repo.to_str().unwrap()))
+    );
     let env = BTreeMap::from([(
         "PATH".to_string(),
         format!(
@@ -734,10 +803,10 @@ fn real_postgres_create_and_drop() {
             std::env::var("PATH").unwrap_or_default()
         ),
     )]);
-    assert!(!exists("repo_a"));
+    assert!(!exists(&plan.name));
     let item = create(&fx.repo, &fx.repo, &c, &plan, &env).unwrap();
     assert_eq!(item.action, Action::Create);
-    assert!(exists("repo_a"));
+    assert!(exists(&plan.name));
     // A second create fails: an existing database is never adopted.
     assert!(create(&fx.repo, &fx.repo, &c, &plan, &env).is_err());
     let mut e = entry(&plan, &c);
@@ -746,9 +815,43 @@ fn real_postgres_create_and_drop() {
         .unwrap()
         .unwrap();
     assert_eq!(item.action, Action::Remove);
-    assert!(!exists("repo_a"));
+    assert!(!exists(&plan.name));
     // dropdb --if-exists on a missing database succeeds.
     drop(&fx.repo, &fx.repo, &e, true, &env, T).unwrap();
     assert!(exists("app_dev"));
     eprintln!("real postgres on port {port}: create and drop verified");
+}
+
+#[test]
+fn defaults_differ_for_same_dir_name_in_different_checkouts() {
+    let a = Path::new("/x/app");
+    let b = Path::new("/y/app");
+    assert_ne!(
+        default_pg_name("app", a, "t"),
+        default_pg_name("app", b, "t")
+    );
+    assert_ne!(
+        default_project("app", a, "t"),
+        default_project("app", b, "t")
+    );
+}
+
+#[test]
+fn long_repo_and_task_defaults_fit_limits() {
+    let repo = "r".repeat(40);
+    let task = "t".repeat(48);
+    let m = Path::new("/main");
+    let pg = default_pg_name(&repo, m, &task);
+    assert_eq!(pg.len(), 63, "{pg}");
+    assert!(pg.ends_with(&format!("_{}_{task}", h("/main"))));
+    let p = plan("provider = \"postgres\"", &repo, &task).unwrap();
+    assert!(p.name.len() <= 63);
+    let proj = default_project(&repo, m, "t");
+    assert_eq!(proj, format!("{}-{}-t", "r".repeat(30), h("/main")));
+    // an empty repo part falls back to `db`
+    assert_eq!(default_pg_name("", m, "t"), format!("db_{}_t", h("/main")));
+    assert_eq!(
+        default_project("--", m, "t"),
+        format!("db-{}-t", h("/main"))
+    );
 }

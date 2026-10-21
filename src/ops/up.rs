@@ -110,11 +110,16 @@ pub fn up(ctx: &Ctx, args: &UpArgs) -> Result<Report, BerthError> {
     let path = worktree_path(repo, &cfg, task);
     let mut sqlite_refusal = None;
     if let Some(dbcfg) = &cfg.db {
-        db::check_tools(dbcfg)?;
         // Validation only: ports are digits, so the real block cannot change a name's validity.
         let stand_in = PortBlock::new(cfg.ports.range[0], cfg.ports.count, &cfg.ports.names());
-        db::resolve(dbcfg, &repo.name, task, &path, &stand_in)?;
-        if dbcfg.provider == Provider::Sqlite {
+        db::resolve(dbcfg, &repo.name, main, task, &path, &stand_in)?;
+        // Tools and the sqlite template matter only when `up` will create the database; an
+        // existing task must stay confirmable (lock-free peek, re-checked under the lock).
+        let known = Manifest::load(main)?.find(task).is_some();
+        if !known {
+            db::check_tools(dbcfg)?;
+        }
+        if !known && dbcfg.provider == Provider::Sqlite {
             sqlite_refusal = db::check_sqlite(main, dbcfg)?;
         }
     }
@@ -251,6 +256,12 @@ pub fn up(ctx: &Ctx, args: &UpArgs) -> Result<Report, BerthError> {
         let item = match db::create(main, &path, dbcfg, plan, &entry.env) {
             Ok(item) => item,
             Err(err) => {
+                if plan.provider == Provider::Postgres {
+                    eprintln!(
+                        "hint: if database {0} is a leftover, drop it with dropdb {0}, or set [db].name",
+                        plan.name
+                    );
+                }
                 job.fail(args.keep_on_failure, &copied, setup_status("skipped", 0.0));
                 return Err(err);
             }
@@ -267,6 +278,11 @@ pub fn up(ctx: &Ctx, args: &UpArgs) -> Result<Report, BerthError> {
             job.db_created.set(true);
             sys::test_pause("after_db_create");
             if let Err(err) = mark_db_created(repo, task) {
+                // The entry cannot record the database, so `down` would never drop it: drop it
+                // now even with --keep-on-failure.
+                if args.keep_on_failure {
+                    job.drop_db();
+                }
                 job.fail(args.keep_on_failure, &copied, setup_status("skipped", 0.0));
                 return Err(err);
             }
@@ -411,7 +427,7 @@ fn existing(
         .map(|d| format!("{} {}", d.provider, d.name));
     let want = match &cfg.db {
         Some(d) => {
-            let plan = db::resolve(d, &repo.name, task, &entry.path, &entry.ports)?;
+            let plan = db::resolve(d, &repo.name, &repo.main, task, &entry.path, &entry.ports)?;
             Some(format!("{} {}", plan.provider.as_str(), plan.name))
         }
         None => None,
@@ -599,7 +615,7 @@ fn create_worktree(
     let db_plan = cfg
         .db
         .as_ref()
-        .map(|d| db::resolve(d, &repo.name, task, path, &ports))
+        .map(|d| db::resolve(d, &repo.name, main, task, path, &ports))
         .transpose()?;
     let env = build_env(&EnvInput {
         repo_name: &repo.name,
@@ -740,21 +756,9 @@ impl Job<'_> {
         manifest.save(main)
     }
 
-    /// Teardown (errors ignored), drop the database this run created (errors are warnings),
-    /// remove the worktree, delete the branch if berth made it and it
-    /// has no commits, free the ports, drop the entry. One lock at a time.
-    fn rollback(&self) {
+    /// Drop the database (or stop the compose project) this run created; errors are warnings.
+    fn drop_db(&self) {
         let main = &self.repo.main;
-        if !self.cfg.teardown.run.is_empty() && self.path.is_dir() {
-            let timeout = Duration::from_secs(self.cfg.teardown.timeout_secs);
-            let _ = run_hooks(
-                "teardown",
-                &self.cfg.teardown.run,
-                self.path,
-                self.hook_env,
-                timeout,
-            );
-        }
         if let Some(db) = self.db.as_ref().filter(|_| self.db_created.get()) {
             let mut record = db.clone();
             record.created = true;
@@ -770,6 +774,24 @@ impl Job<'_> {
                 db::drop(main, cwd, &record, true, self.env, timeout).map(drop),
             );
         }
+    }
+
+    /// Teardown (errors ignored), drop the database this run created (errors are warnings),
+    /// remove the worktree, delete the branch if berth made it and it
+    /// has no commits, free the ports, drop the entry. One lock at a time.
+    fn rollback(&self) {
+        let main = &self.repo.main;
+        if !self.cfg.teardown.run.is_empty() && self.path.is_dir() {
+            let timeout = Duration::from_secs(self.cfg.teardown.timeout_secs);
+            let _ = run_hooks(
+                "teardown",
+                &self.cfg.teardown.run,
+                self.path,
+                self.hook_env,
+                timeout,
+            );
+        }
+        self.drop_db();
         cleanup(
             "remove the worktree",
             git::worktree_remove(main, self.path, true),

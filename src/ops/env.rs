@@ -31,8 +31,15 @@ pub fn env(ctx: &Ctx, args: &EnvArgs) -> Result<Report, BerthError> {
         }
     };
     let mut report = Report::new("env");
-    let cfg = config::load(&ctx.repo.main)?;
-    report.text = Some(match cache::hoard(&ctx.repo.main, &cfg.cache) {
+    // A broken berth.toml must not hide the recorded environment: only hoard needs the config.
+    let hoard = match config::load(&ctx.repo.main) {
+        Ok(cfg) => cache::hoard(&ctx.repo.main, &cfg.cache),
+        Err(err) => {
+            eprintln!("warning: {err}; hoard values not exported");
+            None
+        }
+    };
+    report.text = Some(match hoard {
         Some(h) => {
             if matches!(args.format, Format::Dotenv | Format::Json) && !ctx.json {
                 eprintln!(

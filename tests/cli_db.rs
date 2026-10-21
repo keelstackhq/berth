@@ -137,28 +137,29 @@ fn postgres_up_ok_down_roundtrip() {
     assert_eq!(code(&out), 0, "{}", stderr(&out));
     let v = json(&out);
     assert!(
-        log(&fx, "createdb").contains("-- repo_a"),
+        log(&fx, "createdb").contains(&format!("-- {}", fx.pg_name("a"))),
         "{}",
         log(&fx, "createdb")
     );
     assert_eq!(
         v["worktrees"][0]["db"],
         serde_json::json!({
-            "provider": "postgres", "name": "repo_a", "created": true,
+            "provider": "postgres", "name": fx.pg_name("a"), "created": true,
             "host": "localhost", "port": 5432
         })
     );
     assert_eq!(
         fs::read_to_string(wt(&fx, "a").join(".db-url")).unwrap(),
-        "postgres://localhost:5432/repo_a\n"
+        format!("postgres://localhost:5432/{}\n", fx.pg_name("a"))
     );
     let env = run(&fx, &["env", "a", "--json"]);
     assert_eq!(
         json(&env)["worktrees"][0]["env"]["DATABASE_URL"],
-        "postgres://localhost:5432/repo_a"
+        format!("postgres://localhost:5432/{}", fx.pg_name("a"))
     );
     let text = String::from_utf8_lossy(&out.stdout).into_owned();
     let mut settings = insta::Settings::clone_current();
+    settings.add_filter(r"repo_[0-9a-f]{6}_a", "repo_[H]_a");
     settings.add_filter(&regex_escape(&root(&fx).display().to_string()), "[ROOT]");
     settings.add_filter(r#""pid": \d+"#, r#""pid": "[PID]""#);
     settings.add_filter(r#""host": "[^"]*""#, r#""host": "[HOST]""#);
@@ -175,7 +176,7 @@ fn postgres_up_ok_down_roundtrip() {
     assert!(
         items
             .iter()
-            .any(|i| i["kind"] == "db" && i["key"] == "repo_a"),
+            .any(|i| i["kind"] == "db" && i["key"] == fx.pg_name("a").as_str()),
         "{items:?}"
     );
     assert_eq!(log(&fx, "createdb").lines().count(), 1);
@@ -184,13 +185,13 @@ fn postgres_up_ok_down_roundtrip() {
     assert_eq!(code(&down), 0, "{}", stderr(&down));
     let items = json(&down)["items"].as_array().unwrap().clone();
     assert!(
-        items
-            .iter()
-            .any(|i| i["kind"] == "db" && i["action"] == "remove" && i["key"] == "repo_a"),
+        items.iter().any(|i| i["kind"] == "db"
+            && i["action"] == "remove"
+            && i["key"] == fx.pg_name("a").as_str()),
         "{items:?}"
     );
     assert!(
-        log(&fx, "dropdb").contains("--if-exists -- repo_a"),
+        log(&fx, "dropdb").contains(&format!("--if-exists -- {}", fx.pg_name("a"))),
         "{}",
         log(&fx, "dropdb")
     );
@@ -224,7 +225,7 @@ fn setup_failure_drops_the_database() {
     let out = run(&fx, &["up", "a"]);
     assert_eq!(code(&out), 3, "{}", stderr(&out));
     assert!(
-        log(&fx, "dropdb").contains("-- repo_a"),
+        log(&fx, "dropdb").contains(&format!("-- {}", fx.pg_name("a"))),
         "{}",
         log(&fx, "dropdb")
     );
@@ -244,7 +245,7 @@ fn keep_on_failure_keeps_database_and_down_drops_it() {
     assert_eq!(e[0]["db"]["created"], true);
     let down = run(&fx, &["down", "a"]);
     assert_eq!(code(&down), 0, "{}", stderr(&down));
-    assert!(log(&fx, "dropdb").contains("-- repo_a"));
+    assert!(log(&fx, "dropdb").contains(&format!("-- {}", fx.pg_name("a"))));
     assert!(entries(&fx).is_empty());
 }
 
@@ -280,7 +281,7 @@ fn down_force_with_failing_dropdb_warns() {
     let items = json(&out)["items"].as_array().unwrap().clone();
     let db = items.iter().find(|i| i["kind"] == "db").expect("db item");
     assert_eq!(db["action"], "drift");
-    assert_eq!(db["key"], "repo_a");
+    assert_eq!(db["key"], fx.pg_name("a"));
     assert_eq!(db["reason"], "not dropped (ignored by --force)");
     assert!(log(&fx, "dropdb").lines().all(|l| l.contains("--force")));
     assert!(entries(&fx).is_empty());
@@ -293,7 +294,7 @@ fn crash_after_createdb_never_drops_on_down() {
     let mut child = spawn_paused(&fx, "after_db_create", "a");
     child.kill().unwrap();
     child.wait().unwrap();
-    assert!(log(&fx, "createdb").contains("-- repo_a"));
+    assert!(log(&fx, "createdb").contains(&format!("-- {}", fx.pg_name("a"))));
     let e = entries(&fx);
     assert_eq!(e[0]["state"], "creating");
     assert_eq!(e[0]["db"]["created"], false);
@@ -319,14 +320,16 @@ fn renamed_db_is_drift_and_down_drops_the_recorded_name() {
     assert_eq!(items[0]["action"], "drift");
     let reason = items[0]["reason"].as_str().unwrap();
     assert!(
-        reason.contains("repo_a") && reason.contains("other_a") && reason.contains("berth down a"),
+        reason.contains(&fx.pg_name("a"))
+            && reason.contains("other_a")
+            && reason.contains("berth down a"),
         "{reason}"
     );
     let down = run(&fx, &["down", "a"]);
     assert_eq!(code(&down), 0, "{}", stderr(&down));
     let drop = log(&fx, "dropdb");
     assert!(
-        drop.contains("-- repo_a") && !drop.contains("other_a"),
+        drop.contains(&format!("-- {}", fx.pg_name("a"))) && !drop.contains("other_a"),
         "{drop}"
     );
 }
@@ -472,23 +475,29 @@ fn compose_up_and_down() {
     assert_eq!(code(&out), 0, "{}", stderr(&out));
     assert_eq!(
         log(&fx, "docker").trim(),
-        "compose --project-name repo-a up --detach --wait db"
+        format!(
+            "compose --project-name {} up --detach --wait db",
+            fx.project("a")
+        )
     );
     let v = json(&out);
     let port = v["worktrees"][0]["env"]["DB_PORT"].as_str().unwrap();
-    assert_eq!(v["worktrees"][0]["env"]["COMPOSE_PROJECT_NAME"], "repo-a");
+    assert_eq!(
+        v["worktrees"][0]["env"]["COMPOSE_PROJECT_NAME"],
+        fx.project("a")
+    );
     assert_eq!(v["worktrees"][0]["db"]["created"], true);
     assert_eq!(
         fs::read_to_string(wt(&fx, "a").join(".compose-env")).unwrap(),
-        format!("repo-a {port}\n")
+        format!("{} {port}\n", fx.project("a"))
     );
     let down = run(&fx, &["down", "a"]);
     assert_eq!(code(&down), 0, "{}", stderr(&down));
-    assert!(
-        log(&fx, "docker")
-            .lines()
-            .any(|l| l == "compose --project-name repo-a down --volumes --remove-orphans")
-    );
+    assert!(log(&fx, "docker").lines().any(|l| l
+        == format!(
+            "compose --project-name {} down --volumes --remove-orphans",
+            fx.project("a")
+        )));
 }
 
 #[test]
@@ -498,9 +507,11 @@ fn compose_failure_rolls_back_with_compose_down() {
     let out = run(&fx, &["up", "a"]);
     assert_eq!(code(&out), 3, "{}", stderr(&out));
     assert!(
-        log(&fx, "docker")
-            .lines()
-            .any(|l| l == "compose --project-name repo-a down --volumes --remove-orphans"),
+        log(&fx, "docker").lines().any(|l| l
+            == format!(
+                "compose --project-name {} down --volumes --remove-orphans",
+                fx.project("a")
+            )),
         "{}",
         log(&fx, "docker")
     );
@@ -516,10 +527,74 @@ fn compose_down_after_worktree_deleted_by_hand() {
     fs::remove_dir_all(wt(&fx, "a")).unwrap();
     let out = run(&fx, &["down", "a"]);
     assert_eq!(code(&out), 0, "{}", stderr(&out));
-    assert!(
-        log(&fx, "docker")
-            .lines()
-            .any(|l| l == "compose --project-name repo-a down --volumes --remove-orphans")
-    );
+    assert!(log(&fx, "docker").lines().any(|l| l
+        == format!(
+            "compose --project-name {} down --volumes --remove-orphans",
+            fx.project("a")
+        )));
     assert!(entries(&fx).is_empty());
+}
+
+#[test]
+fn up_on_existing_task_ignores_nonempty_wal() {
+    let fx = sqlite_fixture();
+    ignore(&fx, "/db/");
+    assert_eq!(code(&run(&fx, &["up", "a"])), 0);
+    write(&fx.repo, "db/dev.sqlite-wal", "pending");
+    let out = run(&fx, &["up", "a", "--json"]);
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    let items = json(&out)["items"].as_array().unwrap().clone();
+    assert!(items.iter().all(|i| i["action"] == "ok"), "{items:?}");
+}
+
+#[test]
+fn up_on_existing_task_ignores_missing_createdb() {
+    let fx = pg_fixture("");
+    assert_eq!(code(&run(&fx, &["up", "a"])), 0);
+    fs::remove_file(fx.bin.join("createdb")).unwrap();
+    let out = fx
+        .berth()
+        .env("PATH", fx.isolated_path())
+        .args(["up", "a", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    let items = json(&out)["items"].as_array().unwrap().clone();
+    assert!(items.iter().all(|i| i["action"] == "ok"), "{items:?}");
+}
+
+#[test]
+fn createdb_failure_prints_a_recovery_hint() {
+    let fx = pg_fixture("");
+    fs::write(fail_flag(&fx, "createdb"), "").unwrap();
+    let out = run(&fx, &["up", "a"]);
+    assert_eq!(code(&out), 3, "{}", stderr(&out));
+    let name = fx.pg_name("a");
+    assert!(
+        stderr(&out).contains(&format!(
+            "hint: if database {name} is a leftover, drop it with dropdb {name}, or set [db].name"
+        )),
+        "{}",
+        stderr(&out)
+    );
+}
+
+#[test]
+fn down_skip_reason_names_the_dropdb_recovery() {
+    let fx = pg_fixture("");
+    let mut child = spawn_paused(&fx, "after_db_create", "a");
+    child.kill().unwrap();
+    child.wait().unwrap();
+    let out = run(&fx, &["down", "a", "--json"]);
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    let name = fx.pg_name("a");
+    let items = json(&out)["items"].as_array().unwrap().clone();
+    let db = items.iter().find(|i| i["kind"] == "db").unwrap();
+    assert_eq!(db["action"], "skipped");
+    assert_eq!(
+        db["reason"],
+        format!(
+            "not created by berth; left in place; drop it with dropdb {name} if it is a leftover"
+        )
+    );
 }

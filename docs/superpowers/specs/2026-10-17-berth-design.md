@@ -117,8 +117,8 @@ range = [21000, 30999]          # below Linux (32768+) and macOS (49152+) epheme
 names = { web = 0, api = 1, storybook = 2, db = 3 }   # → WEB_PORT=base+0, API_PORT=base+1, ...
 
 [env]                           # non-secret values; {placeholders} from §7
-DATABASE_URL = "postgres://localhost:5432/app_{task_snake}"
-COMPOSE_PROJECT_NAME = "{repo}-{task}"
+# With [db] below, DATABASE_URL and (compose) COMPOSE_PROJECT_NAME come from [db] and are rejected
+# here; without [db] you could set them yourself, e.g. DATABASE_URL = "postgres://localhost/app_{task_snake}"
 
 [db]                            # optional; absent = no database handling
 provider = "postgres"           # required: "sqlite" | "postgres" | "compose"
@@ -127,12 +127,12 @@ url = "..."                     # URL template (§7 placeholders, {db.name}, {db
 timeout_secs = 300              # per createdb/dropdb/docker call
 template = "app_template"       # sqlite: file to copy (required); postgres: template database
 path = "dev.db"                 # sqlite only: file inside the worktree (default = template)
-name = "app_{task_snake}"       # postgres only: database name (default <repo>_<task_snake>)
+name = "app_{task_snake}"       # postgres only: database name (default <repo>_<h>_<task_snake>, §7)
 host = "localhost"              # postgres only
 port = 5432                     # postgres only
 user = "me"                     # postgres only; no password is ever handled
 services = ["db"]               # compose only: services to start (default all)
-project = "{repo}-{task}"       # compose only: project name (default <repo>-<task>)
+project = "{repo}-{task}"       # compose only: project name (default <repo>-<h>-<task>, §7)
 
 [cache]
 turbo_seed = "off"              # "off" | "link" | "copy": seed .turbo/cache from the main checkout
@@ -214,6 +214,14 @@ Per user (ports are machine-wide): `$BERTH_STATE_DIR`, else `$XDG_STATE_HOME/ber
   (postgres, compose) and `{db.path}` (sqlite). Unknown placeholder → exit 3.
 - With `[db]`: the URL as `[db].env` (default `DATABASE_URL`; `""` exports none), and
   `COMPOSE_PROJECT_NAME=<project>` for compose. `[env]` cannot set either (§4).
+- Default names, unique per checkout: `<h>` is the first 6 hex chars of FNV-1a (64 bit) over the
+  bytes of the main checkout path, so two clones in directories of the same name do not share a
+  database or compose project (`down` in one never touches the other's). Postgres:
+  `<repo>_<h>_<task_snake>`, repo lowercased with other chars as `_`, cut so the whole name is at
+  most 63 bytes (`db` if nothing is left). Compose: `<repo>-<h>-<task>`, repo lowercased with
+  other chars as `-`, leading `-`/`_` trimmed, cut to 30. An explicit `[db].name`/`[db].project`
+  is used as given (still validated). `createdb` failing with "already exists" prints
+  `hint: if database <name> is a leftover, drop it with dropdb <name>, or set [db].name`.
 
 - With `[cache] remote = "hoard"` and a running server (§12), `berth env` adds `TURBO_API` and
   `TURBO_TEAM=hoard`, read live (never stored in the manifest or `--json`). `sh` ends with
@@ -235,10 +243,11 @@ never exported: they stay in `.env`, read by the app's own loader.
    checked (`git check-ref-format --branch`, exit 2) and the base resolved (exit 3) here, before
    any lock, port or file. A manifest tracked by git (`git ls-files --error-unmatch
    .agents/worktrees.json`) is exit 3: "run git rm --cached .agents/worktrees.json".
-   With `[db]`: the provider's tools are on `PATH` (`createdb` and `dropdb`, or `docker`; else
-   exit 3), the database name resolves (validation with a stand-in port block) and, for sqlite,
-   the template is a regular file without a pending `-wal` (else exit 3). All before any lock,
-   port or file.
+   With `[db]`: the database name resolves (validation with a stand-in port block, always).
+   For a task with no manifest entry yet (a lock-free peek; `up` on an existing task stays
+   idempotent, §3) the provider's tools are also on `PATH` (`createdb` and `dropdb`, or `docker`;
+   else exit 3) and, for sqlite, the template is a regular file without a pending `-wal` (else
+   exit 3). All before any lock, port or file.
 2. Take the repo lock `<git-common-dir>/berth.lock`. The user lock `<state>/ports.lock` is taken
    in step 4 only. Lock order is always repo → user, so two repos and two tasks cannot deadlock.
 3. Check: task not present (else §3 idempotency; a `creating` entry whose owner is alive → exit 1
@@ -328,7 +337,9 @@ are gitignored by rule (§8.3), so they never block. Commits are safe because th
 `--delete-branch` deletes it only if it is merged into `base` (else refused, exit 1). "Merged"
 means the branch is an ancestor of `base`, or, with git >= 2.38, `git merge-tree --write-tree
 <base> <branch>` succeeds and yields base's own tree, i.e. every change of the branch is already
-in `base` (squash and rebase merges). berth never fetches: it compares with the local `base`, so
+in `base` (squash and rebase merges). `merge-tree --write-tree` writes unreachable objects to
+the object store (harmless; `git gc` prunes them), so the `gc` scan takes no lock and changes no
+berth state but is not strictly write-free. berth never fetches: it compares with the local `base`, so
 `git pull` first; with older git only the ancestor test applies. Then
 teardown hook, the database drop (below), `git worktree remove` (`--force` passed through only with berth's `--force`),
 `git worktree prune`, release ports, drop the manifest entry.

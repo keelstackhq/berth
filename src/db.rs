@@ -55,17 +55,37 @@ fn sanitize(repo: &str, keep_dash: bool) -> String {
         .collect()
 }
 
-/// `<repo>_<task_snake>`, repo lowercased with every char outside `[a-z0-9_]` turned into `_`.
-pub fn default_pg_name(repo: &str, task: &str) -> String {
-    format!("{}_{}", sanitize(repo, false), task.replace('-', "_"))
+/// First 6 hex chars of the FNV-1a hash of the main checkout path: tells apart two clones whose
+/// directories share a name.
+fn path_hash(main: &Path) -> String {
+    let h = crate::ports::fnv1a64(main.as_os_str().as_encoded_bytes());
+    format!("{h:016x}")[..6].to_string()
 }
 
-/// `<repo>-<task>`, repo lowercased, chars outside `[a-z0-9_-]` turned into `-`, leading `-`/`_`
-/// trimmed.
-pub fn default_project(repo: &str, task: &str) -> String {
+/// `<repo>_<h>_<task_snake>`: repo lowercased with every char outside `[a-z0-9_]` turned into `_`
+/// and cut so the whole name fits 63 bytes (`db` when nothing is left); `<h>` hashes `main`.
+pub fn default_pg_name(repo: &str, main: &Path, task: &str) -> String {
+    let task = task.replace('-', "_");
+    let room = 63usize.saturating_sub(task.len() + 8);
+    let mut repo = sanitize(repo, false);
+    repo.truncate(room);
+    if repo.is_empty() {
+        repo = "db".to_string();
+    }
+    format!("{repo}_{}_{task}", path_hash(main))
+}
+
+/// `<repo>-<h>-<task>`: repo lowercased, chars outside `[a-z0-9_-]` turned into `-`, leading
+/// `-`/`_` trimmed, cut to 30 (`db` when nothing is left); `<h>` hashes `main`.
+pub fn default_project(repo: &str, main: &Path, task: &str) -> String {
     let repo = sanitize(repo, true);
-    let repo = repo.trim_start_matches(['-', '_']);
-    format!("{repo}-{task}")
+    let repo: String = repo
+        .trim_start_matches(['-', '_'])
+        .chars()
+        .take(30)
+        .collect();
+    let repo = if repo.is_empty() { "db" } else { &repo };
+    format!("{repo}-{}-{task}", path_hash(main))
 }
 
 fn valid_pg_name(n: &str) -> bool {
@@ -88,6 +108,7 @@ fn valid_project(n: &str) -> bool {
 pub fn resolve(
     cfg: &DbCfg,
     repo_name: &str,
+    main: &Path,
     task: &str,
     worktree: &Path,
     ports: &PortBlock,
@@ -106,7 +127,7 @@ pub fn resolve(
         Provider::Postgres => {
             let name = match &cfg.name {
                 Some(t) => expand("name", t, &BTreeMap::new())?,
-                None => default_pg_name(repo_name, task),
+                None => default_pg_name(repo_name, main, task),
             };
             if !valid_pg_name(&name) {
                 return Err(cfg_err(format!(
@@ -136,7 +157,7 @@ pub fn resolve(
         Provider::Compose => {
             let name = match &cfg.project {
                 Some(t) => expand("project", t, &BTreeMap::new())?,
-                None => default_project(repo_name, task),
+                None => default_project(repo_name, main, task),
             };
             if !valid_project(&name) {
                 return Err(cfg_err(format!(
@@ -394,7 +415,10 @@ pub fn drop(
                     "db",
                     &db.name,
                     Action::Skipped,
-                    "not created by berth; left in place",
+                    format!(
+                        "not created by berth; left in place; drop it with dropdb {} if it is a leftover",
+                        db.name
+                    ),
                 )));
             }
             let mut args = vec!["dropdb".to_string()];

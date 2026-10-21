@@ -478,11 +478,14 @@ fn postgres_entry_not_recorded_as_created_is_drift() {
     set_created(&fx, false);
     let (code, v) = doctor(&fx);
     assert_eq!(code, 1, "{v}");
-    let item = find(&v, "db", "repo_a");
+    let item = find(&v, "db", &fx.pg_name("a"));
     assert_eq!(item["action"], "drift");
     assert_eq!(
         item["reason"],
-        "database repo_a was not recorded as created; berth down will leave it"
+        format!(
+            "database {} was not recorded as created; berth down will leave it",
+            fx.pg_name("a")
+        )
     );
     assert_eq!(
         fs::read_to_string(&log).unwrap(),

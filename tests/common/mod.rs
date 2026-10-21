@@ -52,6 +52,23 @@ impl Fixture {
         fx
     }
 
+    /// First 6 hex chars of FNV-1a over the canonical main checkout path (the default-name hash).
+    pub fn hash6(&self) -> String {
+        let main = fs::canonicalize(&self.repo).expect("canonicalize repo");
+        let h = berth::ports::fnv1a64(main.as_os_str().as_encoded_bytes());
+        format!("{h:016x}")[..6].to_string()
+    }
+
+    /// The default postgres name for `task` (`repo_<h>_<task>`).
+    pub fn pg_name(&self, task: &str) -> String {
+        format!("repo_{}_{task}", self.hash6())
+    }
+
+    /// The default compose project for `task` (`repo-<h>-<task>`).
+    pub fn project(&self, task: &str) -> String {
+        format!("repo-{}-{task}", self.hash6())
+    }
+
     /// Another repo under the same root (same state dir and port range).
     pub fn add_repo(&self, name: &str) -> PathBuf {
         let path = self.root.path().join(name);
