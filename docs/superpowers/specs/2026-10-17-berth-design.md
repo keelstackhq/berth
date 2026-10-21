@@ -119,10 +119,37 @@ names = { web = 0, api = 1, storybook = 2, db = 3 }   # → WEB_PORT=base+0, API
 DATABASE_URL = "postgres://localhost:5432/app_{task_snake}"
 COMPOSE_PROJECT_NAME = "{repo}-{task}"
 
+[db]                            # optional; absent = no database handling
+provider = "postgres"           # required: "sqlite" | "postgres" | "compose"
+env = "DATABASE_URL"            # variable that receives the URL; "" exports none
+url = "..."                     # URL template (§7 placeholders, {db.name}, {db.path}); default per provider
+timeout_secs = 300              # per createdb/dropdb/docker call
+template = "app_template"       # sqlite: file to copy (required); postgres: template database
+path = "dev.db"                 # sqlite only: file inside the worktree (default = template)
+name = "app_{task_snake}"       # postgres only: database name (default <repo>_<task_snake>)
+host = "localhost"              # postgres only
+port = 5432                     # postgres only
+user = "me"                     # postgres only; no password is ever handled
+services = ["db"]               # compose only: services to start (default all)
+project = "{repo}-{task}"       # compose only: project name (default <repo>-<task>)
+
+[cache]
+turbo_seed = "off"              # "off" | "link" | "copy": seed .turbo/cache from the main checkout
+remote = "none"                 # "none" | "hoard": export a running `hoard serve` to the worktree
+hoard_dir = ".hoard"            # relative to the main checkout: holds hoard's port and token files
+
 [setup]                         # run in the new worktree, in order, after copy; stderr streamed
 run = ["pnpm install --frozen-lockfile"]
 timeout_secs = 900              # [teardown] has the same keys; runs before removal
 ```
+
+`[db]` and `[cache]` config errors (exit 3, naming the key): unknown `provider`; a `[db]` key for
+the wrong provider (`template` sqlite/postgres, `path` sqlite, `name`/`host`/`port`/`user`
+postgres, `services`/`project` compose); sqlite without `template`; sqlite `template`/`path`
+empty, absolute or containing `..`; `env` not `""` or `[A-Z_][A-Z0-9_]*` or reserved; bad characters
+in `host`, `user`, a postgres `template` or `services`; `timeout_secs = 0`; `[env]` setting the
+`[db].env` variable (use `[db].url`), `COMPOSE_PROJECT_NAME` with compose (use `[db].project`) or
+`TURBO_API`/`TURBO_TOKEN`/`TURBO_TEAM` with `remote = "hoard"`; unknown `[cache]` keys or values.
 
 No `[copy]` but a `.worktreeinclude` file → its patterns are used (confirm format at plan time).
 `.worktreeinclude` matches that git does not ignore are `skipped` (Claude Code behaviour); `[copy]`
