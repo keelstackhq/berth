@@ -3,7 +3,7 @@
 ## Status
 
 Milestone 1 merged to `main` (PR #1, 2026-10-18; decisions channel in PR #2, 2026-10-21). Milestone 2
-(services) in progress, plan `docs/superpowers/plans/2026-10-21-berth-m2.md`: Tasks 1 (`[db]`, `[cache]` config), 2 (database plan, manifest `db` field, env) and 3 (squash-aware `git::is_merged`) done; Task 4 next.
+(services) in progress, plan `docs/superpowers/plans/2026-10-21-berth-m2.md`: Tasks 1 (`[db]`, `[cache]` config), 2 (database plan, manifest `db` field, env) 3 (squash-aware `git::is_merged`) and 4 (sqlite, postgres, compose providers) done; Task 5 next.
 
 ## Done
 
@@ -26,6 +26,7 @@ Milestone 1 merged to `main` (PR #1, 2026-10-18; decisions channel in PR #2, 202
 - 2026-10-21 · M2 Task 1 · `[db]` and `[cache]` in `berth.toml` (`DbCfg`, `Provider`, `CacheCfg`, `Remote`, `Seed`, validation, spec §4) · `cargo test --test config` 20/20, fmt, clippy, `cargo test --locked` green
 - 2026-10-21 · M2 Task 2 · database plan (`src/db.rs` `resolve`/`entry`), `Entry.db`, `env::expand_with`, `{db.*}` placeholders, `DATABASE_URL`/`COMPOSE_PROJECT_NAME`; spec §6, §7 · `cargo test --test db` 10/10, `env` 12/12, `state` 14/14, fmt, clippy, `cargo test --locked` green
 - 2026-10-21 · M2 Task 3 · `git::version`, squash-aware `git::is_merged` (ancestor, or git >= 2.38 `merge-tree --write-tree` yields base's tree), used by `down --delete-branch` pre-check and re-check; spec §11 · `cargo test --test git` 25/25, `cli_down` 14/14, fmt, clippy, `cargo test --locked` green
+- 2026-10-21 · M2 Task 4 · database providers: `check_tools`, `check_sqlite`, `create`, `drop` (createdb/dropdb/docker compose via `run_hooks`, sqlite byte copy via `.berth/tmp`); `Fixture::fake_bin`/`isolated_path`; copy helpers `pub(crate)` · `cargo test --test db` 31/31 incl. real PostgreSQL 16 create+drop (`BERTH_TEST_PG_BIN`), fmt, clippy, `cargo test --locked` green
 
 ## Blocked
 

@@ -138,7 +138,7 @@ pub fn plan_copy(repo: &Repo, src: &CopySource, max_bytes: u64) -> Result<CopyPl
 }
 
 /// First symlink among the existing components of `rel`'s parent chain inside `wt`.
-fn symlink_in_parents(wt: &Path, rel: &str) -> Result<bool, BerthError> {
+pub(crate) fn symlink_in_parents(wt: &Path, rel: &str) -> Result<bool, BerthError> {
     let mut cur = wt.to_path_buf();
     let parts: Vec<&str> = rel.split('/').collect();
     for part in &parts[..parts.len().saturating_sub(1)] {
@@ -155,7 +155,7 @@ fn symlink_in_parents(wt: &Path, rel: &str) -> Result<bool, BerthError> {
 
 /// Stage `src` in `tmp_dir`, then link it into place. `Ok(false)` when `target` appeared
 /// meanwhile: an existing file is never replaced.
-fn copy_one(src: &Path, target: &Path, tmp_dir: &Path) -> Result<bool, BerthError> {
+pub(crate) fn copy_one(src: &Path, target: &Path, tmp_dir: &Path) -> Result<bool, BerthError> {
     static COUNTER: AtomicUsize = AtomicUsize::new(0);
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let tmp: PathBuf = tmp_dir.join(format!("copy-{}-{n}", std::process::id()));
@@ -177,7 +177,7 @@ fn copy_one(src: &Path, target: &Path, tmp_dir: &Path) -> Result<bool, BerthErro
     result
 }
 
-fn safe_relative(rel: &str) -> bool {
+pub(crate) fn safe_relative(rel: &str) -> bool {
     !rel.is_empty()
         && !rel.starts_with('/')
         && rel.split('/').all(|c| !matches!(c, "" | "." | ".."))
