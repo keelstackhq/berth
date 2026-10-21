@@ -2,7 +2,8 @@
 
 ## Status
 
-Milestone 1, plan `docs/superpowers/plans/2026-10-17-berth-m1.md`: Tasks 1-15 done (M1 complete pending whole-branch review).
+Milestone 1 merged to `main` (PR #1, 2026-10-18; decisions channel in PR #2, 2026-10-21). Milestone 2
+(services) next: plan `docs/superpowers/plans/2026-10-21-berth-m2.md`.
 
 ## Done
 
@@ -25,7 +26,5 @@ Milestone 1, plan `docs/superpowers/plans/2026-10-17-berth-m1.md`: Tasks 1-15 do
 
 ## Blocked
 
-- **Default branch.** keelstackhq/berth has no `main`. Create it (Settings, or push an empty
-  root commit to `main`), then open the M1 PR from `claude/friendly-hamilton-mn95h1`.
 - **Branch protection.** Protect `main` and require the `ci-ok` status check.
 - **Release.** No crates.io/npm release yet; `keel-berth` is unpublished.
