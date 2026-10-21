@@ -1,8 +1,10 @@
 #![forbid(unsafe_code)]
 
+pub mod cache;
 pub mod cli;
 pub mod config;
 pub mod copy;
+pub mod db;
 pub mod env;
 pub mod error;
 pub mod git;
@@ -68,6 +70,7 @@ pub fn run(cli: Cli) -> Result<Report, BerthError> {
         cli::Command::Down(args) => ops::down::down(&ctx, args),
         cli::Command::Ls => ops::ls::ls(&ctx),
         cli::Command::Env(args) => ops::env::env(&ctx, args),
+        cli::Command::Gc(args) => ops::gc::gc(&ctx, args),
         cli::Command::Doctor => ops::doctor::doctor(&ctx),
     }
 }

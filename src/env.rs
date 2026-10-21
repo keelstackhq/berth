@@ -4,6 +4,8 @@ use std::collections::BTreeMap;
 use std::path::Path;
 
 use crate::cli::Format;
+use crate::config::Provider;
+use crate::db::DbPlan;
 use crate::error::BerthError;
 use crate::manifest::PortBlock;
 
@@ -14,6 +16,7 @@ pub struct EnvInput<'a> {
     pub task: &'a str,
     pub ports: &'a PortBlock,
     pub extra: &'a BTreeMap<String, String>,
+    pub db: Option<&'a DbPlan>,
 }
 
 /// berth's own variables, cache isolation, then each `[env]` value with placeholders expanded.
@@ -39,8 +42,25 @@ pub fn build_env(i: &EnvInput) -> Result<BTreeMap<String, String>, BerthError> {
     );
     set("CARGO_TARGET_DIR", format!("{wt}/target"));
     set("TMPDIR", format!("{wt}/.berth/tmp"));
+    let placeholders = db_placeholders(i.db);
+    if let Some(db) = i.db {
+        if let (Some(var), Some(url)) = (&db.env_var, &db.url) {
+            env.insert(var.clone(), url.clone());
+        }
+        if db.provider == Provider::Compose {
+            env.insert("COMPOSE_PROJECT_NAME".into(), db.name.clone());
+        }
+    }
     for (key, template) in i.extra {
-        let value = expand(template, i.task, i.repo_name, i.worktree, i.ports).map_err(|tok| {
+        let value = expand_with(
+            template,
+            i.task,
+            i.repo_name,
+            i.worktree,
+            i.ports,
+            &placeholders,
+        )
+        .map_err(|tok| {
             let message = if tok.starts_with('{') && tok.ends_with('}') && tok.len() > 1 {
                 format!("unknown placeholder {tok} in [env].{key}")
             } else {
@@ -56,6 +76,28 @@ pub fn build_env(i: &EnvInput) -> Result<BTreeMap<String, String>, BerthError> {
     Ok(env)
 }
 
+/// The `{db.*}` placeholders a plan provides: `db.url` (when a URL exists), `db.name`
+/// (postgres, compose), `db.path` (sqlite).
+pub fn db_placeholders(db: Option<&DbPlan>) -> BTreeMap<String, String> {
+    let mut map = BTreeMap::new();
+    if let Some(db) = db {
+        if let Some(url) = &db.url {
+            map.insert("db.url".to_string(), url.clone());
+        }
+        match db.provider {
+            Provider::Sqlite => {
+                if let Some(path) = &db.abs_path {
+                    map.insert("db.path".to_string(), path.display().to_string());
+                }
+            }
+            Provider::Postgres | Provider::Compose => {
+                map.insert("db.name".to_string(), db.name.clone());
+            }
+        }
+    }
+    map
+}
+
 /// Expand `{repo}`, `{task}`, `{task_snake}`, `{port.base}`, `{port.<name>}`, `{worktree}`.
 /// `{{` and `}}` are literal braces. On a bad token the error is the token text: `{x}` for an
 /// unknown placeholder, or the stray/unclosed fragment (`}`, `{x`) for unbalanced braces.
@@ -65,6 +107,18 @@ pub fn expand(
     repo_name: &str,
     worktree: &Path,
     ports: &PortBlock,
+) -> Result<String, String> {
+    expand_with(template, task, repo_name, worktree, ports, &BTreeMap::new())
+}
+
+/// `expand` plus `extra` placeholders (keys such as `db.url`, without braces).
+pub fn expand_with(
+    template: &str,
+    task: &str,
+    repo_name: &str,
+    worktree: &Path,
+    ports: &PortBlock,
+    extra: &BTreeMap<String, String>,
 ) -> Result<String, String> {
     let mut out = String::new();
     let mut rest = template;
@@ -92,6 +146,7 @@ pub fn expand(
                 "task_snake" => out.push_str(&task.replace('-', "_")),
                 "worktree" => out.push_str(&worktree.display().to_string()),
                 "port.base" => out.push_str(&ports.start.to_string()),
+                _ if extra.contains_key(name) => out.push_str(&extra[name]),
                 _ => match name.strip_prefix("port.").and_then(|n| ports.named.get(n)) {
                     Some(port) => out.push_str(&port.to_string()),
                     None => return Err(token.to_string()),
@@ -126,6 +181,34 @@ fn dotenv_quote(s: &str) -> String {
         }
     }
     out.push('"');
+    out
+}
+
+/// `format_env` plus the hoard remote cache: `TURBO_API` and `TURBO_TEAM` join the sorted
+/// variables; the token never does. `sh` and `fish` end with a line that reads `token_file` when
+/// evaluated; `dotenv` and `json` leave the token out (the caller says so on stderr).
+pub fn format_env_hoard(
+    env: &BTreeMap<String, String>,
+    f: Format,
+    api: &str,
+    token_file: &Path,
+) -> String {
+    let mut env = env.clone();
+    env.insert("TURBO_API".into(), api.to_string());
+    env.insert("TURBO_TEAM".into(), "hoard".into());
+    let mut out = format_env(&env, f);
+    let file = token_file.display().to_string();
+    match f {
+        Format::Sh => out.push_str(&format!(
+            "export TURBO_TOKEN=\"$(cat {})\"\n",
+            sh_quote(&file)
+        )),
+        Format::Fish => out.push_str(&format!(
+            "set -gx TURBO_TOKEN (cat {})\n",
+            fish_quote(&file)
+        )),
+        Format::Dotenv | Format::Json => {}
+    }
     out
 }
 

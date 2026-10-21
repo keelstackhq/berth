@@ -23,6 +23,7 @@ pub struct Fixture {
     pub home: PathBuf,
     pub state: PathBuf,
     pub tmp: PathBuf,
+    pub bin: PathBuf,
     pub range: (u16, u16),
 }
 
@@ -40,14 +41,32 @@ impl Fixture {
             home: base.join("home"),
             state: base.join("state"),
             tmp: base.join("tmp"),
+            bin: base.join("bin"),
             range: port_range(),
             root,
         };
-        for d in [&fx.home, &fx.state, &fx.tmp] {
+        for d in [&fx.home, &fx.state, &fx.tmp, &fx.bin] {
             fs::create_dir_all(d).expect("mkdir");
         }
         init_repo(&fx.repo);
         fx
+    }
+
+    /// First 6 hex chars of FNV-1a over the canonical main checkout path (the default-name hash).
+    pub fn hash6(&self) -> String {
+        let main = fs::canonicalize(&self.repo).expect("canonicalize repo");
+        let h = berth::ports::fnv1a64(main.as_os_str().as_encoded_bytes());
+        format!("{h:016x}")[..6].to_string()
+    }
+
+    /// The default postgres name for `task` (`repo_<h>_<task>`).
+    pub fn pg_name(&self, task: &str) -> String {
+        format!("repo_{}_{task}", self.hash6())
+    }
+
+    /// The default compose project for `task` (`repo-<h>-<task>`).
+    pub fn project(&self, task: &str) -> String {
+        format!("repo-{}-{task}", self.hash6())
     }
 
     /// Another repo under the same root (same state dir and port range).
@@ -64,12 +83,47 @@ impl Fixture {
         write(repo, "berth.toml", &body);
     }
 
+    /// `<root>/bin` first, then the inherited `PATH`.
+    pub fn path_with_bin(&self) -> String {
+        let rest = std::env::var("PATH").unwrap_or_default();
+        format!("{}:{rest}", self.bin.display())
+    }
+
+    /// Write an executable `<root>/bin/<name>` (`#!/bin/sh` + `script`).
+    pub fn fake_bin(&self, name: &str, script: &str) -> PathBuf {
+        use std::os::unix::fs::PermissionsExt;
+        let path = self.bin.join(name);
+        fs::write(&path, format!("#!/bin/sh\n{script}\n")).expect("write fake bin");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o755)).expect("chmod");
+        path
+    }
+
+    /// A `PATH` of one directory, `<root>/onlybin`, with symlinks to the real `git`, `sh`,
+    /// `cat`, `env` and the fake bins only (for "tool missing" tests).
+    pub fn isolated_path(&self) -> String {
+        let dir = self.root.path().join("onlybin");
+        fs::create_dir_all(&dir).expect("mkdir onlybin");
+        let real = std::env::var("PATH").unwrap_or_default();
+        for tool in ["git", "sh", "cat", "env"] {
+            let found = std::env::split_paths(&real)
+                .map(|d| d.join(tool))
+                .find(|p| p.is_file())
+                .unwrap_or_else(|| panic!("{tool} not on PATH"));
+            let _ = std::os::unix::fs::symlink(found, dir.join(tool));
+        }
+        for entry in fs::read_dir(&self.bin).expect("read bin").flatten() {
+            let _ = std::os::unix::fs::symlink(entry.path(), dir.join(entry.file_name()));
+        }
+        dir.display().to_string()
+    }
+
     pub fn berth(&self) -> Command {
         let mut cmd = Command::new(env!("CARGO_BIN_EXE_berth"));
         cmd.current_dir(&self.repo)
             .env("BERTH_STATE_DIR", &self.state)
             .env("HOME", &self.home)
             .env("TMPDIR", &self.tmp)
+            .env("PATH", self.path_with_bin())
             .env_remove("XDG_STATE_HOME");
         for (k, v) in GIT_ENV {
             cmd.env(k, v);
@@ -83,6 +137,7 @@ impl Fixture {
             .env("BERTH_STATE_DIR", &self.state)
             .env("HOME", &self.home)
             .env("TMPDIR", &self.tmp)
+            .env("PATH", self.path_with_bin())
             .env_remove("XDG_STATE_HOME");
         for (k, v) in GIT_ENV {
             cmd.env(k, v);

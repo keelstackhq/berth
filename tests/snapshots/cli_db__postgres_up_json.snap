@@ -1,0 +1,113 @@
+---
+source: tests/cli_db.rs
+expression: text
+---
+{
+  "version": 1,
+  "command": "up",
+  "ok": true,
+  "exit_code": 0,
+  "items": [
+    {
+      "kind": "worktree",
+      "key": "a",
+      "action": "create",
+      "reason": "[ROOT]/repo.berth/a"
+    },
+    {
+      "kind": "branch",
+      "key": "berth/a",
+      "action": "create",
+      "reason": "from [SHA]"
+    },
+    {
+      "kind": "ports",
+      "key": "[PORT]-[PORT]",
+      "action": "create",
+      "reason": "api=[PORT] db=[PORT] storybook=[PORT] web=[PORT]"
+    },
+    {
+      "kind": "db",
+      "key": "repo_[H]_a",
+      "action": "create",
+      "reason": "created (empty)"
+    },
+    {
+      "kind": "exclude",
+      "key": "/.berth/",
+      "action": "create",
+      "reason": "added to info/exclude"
+    },
+    {
+      "kind": "exclude",
+      "key": "/.agents/.*.tmp.*",
+      "action": "create",
+      "reason": "added to info/exclude"
+    },
+    {
+      "kind": "exclude",
+      "key": "/.agents/worktrees.json",
+      "action": "create",
+      "reason": "added to info/exclude"
+    },
+    {
+      "kind": "setup",
+      "key": "a",
+      "action": "create",
+      "reason": "ok"
+    }
+  ],
+  "worktrees": [
+    {
+      "task": "a",
+      "branch": "berth/a",
+      "base": "[SHA]",
+      "path": "[ROOT]/repo.berth/a",
+      "state": "ready",
+      "ports": {
+        "start": [PORT],
+        "end": [PORT],
+        "named": {
+          "api": [PORT],
+          "db": [PORT],
+          "storybook": [PORT],
+          "web": [PORT]
+        }
+      },
+      "env": {
+        "API_PORT": "[PORT]",
+        "BERTH_PORT_BASE": "[PORT]",
+        "BERTH_PORT_COUNT": "10",
+        "BERTH_ROOT": "[ROOT]/repo",
+        "BERTH_TASK": "a",
+        "BERTH_WORKTREE": "[ROOT]/repo.berth/a",
+        "CARGO_TARGET_DIR": "[ROOT]/repo.berth/a/target",
+        "DATABASE_URL": "postgres://localhost:5432/repo_[H]_a",
+        "DB_PORT": "[PORT]",
+        "PORT": "[PORT]",
+        "STORYBOOK_PORT": "[PORT]",
+        "TMPDIR": "[ROOT]/repo.berth/a/.berth/tmp",
+        "TURBO_CACHE_DIR": "[ROOT]/repo.berth/a/.turbo/cache",
+        "VITE_CACHE_PATH": "[ROOT]/repo.berth/a/node_modules/.vite/task-cache",
+        "WEB_PORT": "[PORT]"
+      },
+      "copied": [],
+      "setup": {
+        "status": "ok",
+        "secs": "[SECS]"
+      },
+      "created_at": "[TIME]",
+      "owner": {
+        "pid": "[PID]",
+        "host": "[HOST]"
+      },
+      "db": {
+        "provider": "postgres",
+        "name": "repo_[H]_a",
+        "created": true,
+        "host": "[HOST]",
+        "port": 5432
+      }
+    }
+  ]
+}

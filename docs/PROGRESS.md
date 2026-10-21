@@ -2,7 +2,9 @@
 
 ## Status
 
-Milestone 1, plan `docs/superpowers/plans/2026-10-17-berth-m1.md`: Tasks 1-15 done (M1 complete pending whole-branch review).
+Milestone 1 merged to `main` (PR #1, 2026-10-18; decisions channel in PR #2, 2026-10-21). Milestone 2
+(services) complete, plan `docs/superpowers/plans/2026-10-21-berth-m2.md`: Tasks 1-11 and the
+whole-branch review fixes done; PR #3.
 
 ## Done
 
@@ -22,10 +24,20 @@ Milestone 1, plan `docs/superpowers/plans/2026-10-17-berth-m1.md`: Tasks 1-15 do
 - 2026-10-17 · Task 14 · concurrency (8 ups/1 repo, 4+4 ups/2 repos, killed up recovers, lock timeout names holder) and secret canaries; doctor treats a live `creating` owner as in progress · concurrency x5 4/4 each, secrets 1/1, cli_doctor 12/12
 - 2026-10-17 · Task 15 · dogfood on a fresh clone of keelstackhq/example-app + README · `up a`/`up b` in parallel exit 0, ports 29710-29719 and 21820-21829, `setup.secs` 4.2 and 4.1 (`pnpm install --frozen-lockfile`, 4.3 s wall); `pnpm run ci` in both at once exit 0, 21/21 tasks, 22.9 s; both `vp dev` servers on `WEB_PORT` answered 200 together; `doctor` 0.1 s over a 550 MB `node_modules` (17.9k files); turbo cache under `TURBO_CACHE_DIR` (63 entries each), Vite+ wrote no task cache under `VITE_CACHE_PATH` (packages never call `vp run`); after `down a`, `down b` `git worktree list` equals the start and `ports.json` has `"blocks": []`; spec §17 updated
 - 2026-10-17 · Final review fixes · `down --force` passes a `creating` owner on another host (same-host live pid still refuses; messages name `berth down --force <task>`); usage errors with `--json` print one Report (exit 2); `up` refuses a tracked `.agents/worktrees.json` (exit 3); post-setup lock timeout says `berth down <task>`; CI actions pinned to SHAs; spec §8/§11 + README · fmt, clippy, `cargo test --locked` all green
+- 2026-10-21 · M2 Task 1 · `[db]` and `[cache]` in `berth.toml` (`DbCfg`, `Provider`, `CacheCfg`, `Remote`, `Seed`, validation, spec §4) · `cargo test --test config` 20/20, fmt, clippy, `cargo test --locked` green
+- 2026-10-21 · M2 Task 2 · database plan (`src/db.rs` `resolve`/`entry`), `Entry.db`, `env::expand_with`, `{db.*}` placeholders, `DATABASE_URL`/`COMPOSE_PROJECT_NAME`; spec §6, §7 · `cargo test --test db` 10/10, `env` 12/12, `state` 14/14, fmt, clippy, `cargo test --locked` green
+- 2026-10-21 · M2 Task 3 · `git::version`, squash-aware `git::is_merged` (ancestor, or git >= 2.38 `merge-tree --write-tree` yields base's tree), used by `down --delete-branch` pre-check and re-check; spec §11 · `cargo test --test git` 25/25, `cli_down` 14/14, fmt, clippy, `cargo test --locked` green
+- 2026-10-21 · M2 Task 4 · database providers: `check_tools`, `check_sqlite`, `create`, `drop` (createdb/dropdb/docker compose via `run_hooks`, sqlite byte copy via `.berth/tmp`); `Fixture::fake_bin`/`isolated_path`; copy helpers `pub(crate)` · `cargo test --test db` 31/31 incl. real PostgreSQL 16 create+drop (`BERTH_TEST_PG_BIN`), fmt, clippy, `cargo test --locked` green
+- 2026-10-21 · M2 Task 5 · databases in `up` (step 1 checks before any lock, step 3 drift, step 6b create + `created` flag, rollback drops) and `down` (drop after teardown, `--force` warns); spec §8, §11 · `cargo test --test cli_db` 17/17 x4 runs, `cli_up`/`cli_down` snapshots unchanged, fmt, clippy, `cargo test --locked` green
+- 2026-10-21 · M2 Task 6 · turbo cache seeding (`src/cache.rs` `seed_turbo`, `[cache] turbo_seed` link|copy, `up` step 6a; never fails `up`); spec §8, §12 · `cargo test --test cli_cache` 8/8 (shared inodes, main untouched after a turbo-style rename), fmt, clippy, `cargo test --locked` green
+- 2026-10-21 · M2 Task 7 · hoard remote-cache export (`cache::hoard`/`hook_env`; hooks get `TURBO_*`, `berth env` prints `TURBO_API`/`TURBO_TEAM` plus a token-file substitution, never the token); spec §7, §12 · `cargo test --test cli_cache` 18/18 (sh output evaluated in `sh`, canary absent from stdout/stderr/JSON/manifest/`-v`), fmt, clippy, `cargo test --locked` green
+- 2026-10-21 · M2 Task 8 · `berth gc [--dry-run] [--delete-branch]` (lock-free scan, each removal through `down_task`, which `down` now wraps unchanged); spec §3, §11 · `cargo test --test cli_gc` 8/8 (merged, squash-merged, open, fresh, dirty, failed kept; failing teardown exit 3), `cli_down` snapshots unchanged, fmt, clippy, `cargo test --locked` green
+- 2026-10-21 · M2 Task 9 · `doctor` checks `[db]` tools, sqlite template/wal/target, unrecorded postgres databases, turbo seed ignore, hoard server (`cache::hoard_quiet`); lock-free, never runs a db tool; spec §11 · `cargo test --test cli_doctor` 22/22, fmt, clippy, `cargo test --locked` green
+- 2026-10-21 · M2 Task 10 · secret canaries for sqlite template, hoard token and `.env` across `up` (json, table, `-v`), `env` x4, `ls`, `doctor`, `gc --dry-run`, `down`, manifest and `ports.json`; no leak found · `cargo test --test secrets` 2/2, fmt, clippy, `cargo test --locked` green
+- 2026-10-21 · M2 Task 11 · dogfood on example-app + README · `up a`/`up b` in parallel 1.3 s wall, ports 24090-24099 and 27760-27769, 63 turbo entries hard-linked into each, postgres `example_app_a`/`_b` from template `app_dev` (PG 16.15, rows copied); `pnpm run check && pnpm run build` in both at once FULL TURBO 1.7 s (main checkout cold 12.6 s), main `.turbo/cache` unchanged; hoard (built from source) exported live, an edit in `a` uploaded 4 artifacts and `b` hit them 18/18; `gc --dry-run`/`gc` removed the merged `a` (DB dropped) and kept fresh `b`; `doctor` 0.1 s, exit 0; after `down b` worktree list as before (main moved by the local merge), `ports.json` `"blocks": []`, no task DBs; sqlite and compose (Docker 29.9.1, real containers and volumes removed) smoke-tested; spec §17 updated. Container note: pnpm 12's self-installed copy lacked its native binary until its `install.js` ran (environment, not berth)
+- 2026-10-21 · M2 review fixes · default db name/project carry a 6-hex checkout-path hash and fit 63/30 chars; `up` on an existing task skips tool/sqlite checks; `env` survives a bad berth.toml; failed `mark_db_created` drops the db even with `--keep-on-failure`; createdb/dropdb recovery hints; spec §4/§7/§8/§11 and README · 6 new tests seen failing first, `cargo test --locked` green, real_postgres ok
 
 ## Blocked
 
-- **Default branch.** keelstackhq/berth has no `main`. Create it (Settings, or push an empty
-  root commit to `main`), then open the M1 PR from `claude/friendly-hamilton-mn95h1`.
 - **Branch protection.** Protect `main` and require the `ci-ok` status check.
 - **Release.** No crates.io/npm release yet; `keel-berth` is unpublished.

@@ -54,6 +54,7 @@ berth up <task> [--base REF] [--branch NAME] [--no-setup] [--keep-on-failure] [-
 berth down <task> [--force] [--delete-branch] [--json]
 berth ls [--json]
 berth env [<task>] [--format sh|fish|dotenv|json]   task defaults to the worktree of the cwd
+berth gc [--dry-run] [--delete-branch] [--json]
 berth doctor [--json]
 ```
 
@@ -64,11 +65,11 @@ Global flags: `-C <dir>`, `--json`, `--no-color`, `-v`. `<task>` is a slug
 
 `0` ok · `1` refused or drift (dirty worktree on `down`, task exists with different settings, a
 copy-listed file git does not ignore, worktree limit reached, task being created by a live `up`:
-"task is being created by pid N", `doctor` found drift) · `2` usage (bad flags or arguments,
+"task is being created by pid N", `doctor` found drift, a `gc` removal that `down` refused) · `2` usage (bad flags or arguments,
 invalid task slug, invalid `--branch`; clap usage errors exit 2) · `3` config or environment
 error (unknown `berth.toml` key, git missing or too old, unknown or `-`-prefixed `--base`: "unknown
 --base ref `<x>`; berth never fetches, run `git fetch` first", no free port block, lock timeout,
-setup hook failed); the message says how to fix it.
+setup hook failed, a `gc` removal that failed); the message says how to fix it.
 
 Justification: berth follows splice's scheme (0 ok · 1 refused/drift · 2 usage · 3 config or
 environment) because berth has no human steps, which is what hoist's `2` means. Agents only need
@@ -116,13 +117,40 @@ range = [21000, 30999]          # below Linux (32768+) and macOS (49152+) epheme
 names = { web = 0, api = 1, storybook = 2, db = 3 }   # → WEB_PORT=base+0, API_PORT=base+1, ...
 
 [env]                           # non-secret values; {placeholders} from §7
-DATABASE_URL = "postgres://localhost:5432/app_{task_snake}"
-COMPOSE_PROJECT_NAME = "{repo}-{task}"
+# With [db] below, DATABASE_URL and (compose) COMPOSE_PROJECT_NAME come from [db] and are rejected
+# here; without [db] you could set them yourself, e.g. DATABASE_URL = "postgres://localhost/app_{task_snake}"
+
+[db]                            # optional; absent = no database handling
+provider = "postgres"           # required: "sqlite" | "postgres" | "compose"
+env = "DATABASE_URL"            # variable that receives the URL; "" exports none
+url = "..."                     # URL template (§7 placeholders, {db.name}, {db.path}); default per provider
+timeout_secs = 300              # per createdb/dropdb/docker call
+template = "app_template"       # sqlite: file to copy (required); postgres: template database
+path = "dev.db"                 # sqlite only: file inside the worktree (default = template)
+name = "app_{task_snake}"       # postgres only: database name (default <repo>_<h>_<task_snake>, §7)
+host = "localhost"              # postgres only
+port = 5432                     # postgres only
+user = "me"                     # postgres only; no password is ever handled
+services = ["db"]               # compose only: services to start (default all)
+project = "{repo}-{task}"       # compose only: project name (default <repo>-<h>-<task>, §7)
+
+[cache]
+turbo_seed = "off"              # "off" | "link" | "copy": seed .turbo/cache from the main checkout
+remote = "none"                 # "none" | "hoard": export a running `hoard serve` to the worktree
+hoard_dir = ".hoard"            # relative to the main checkout: holds hoard's port and token files
 
 [setup]                         # run in the new worktree, in order, after copy; stderr streamed
 run = ["pnpm install --frozen-lockfile"]
 timeout_secs = 900              # [teardown] has the same keys; runs before removal
 ```
+
+`[db]` and `[cache]` config errors (exit 3, naming the key): unknown `provider`; a `[db]` key for
+the wrong provider (`template` sqlite/postgres, `path` sqlite, `name`/`host`/`port`/`user`
+postgres, `services`/`project` compose); sqlite without `template`; sqlite `template`/`path`
+empty, absolute or containing `..`; `env` not `""` or `[A-Z_][A-Z0-9_]*` or reserved; bad characters
+in `host`, `user`, a postgres `template` or `services`; `timeout_secs = 0`; `[env]` setting the
+`[db].env` variable (use `[db].url`), `COMPOSE_PROJECT_NAME` with compose (use `[db].project`) or
+`TURBO_API`/`TURBO_TOKEN`/`TURBO_TEAM` with `remote = "hoard"`; unknown `[cache]` keys or values.
 
 No `[copy]` but a `.worktreeinclude` file → its patterns are used (confirm format at plan time).
 `.worktreeinclude` matches that git does not ignore are `skipped` (Claude Code behaviour); `[copy]`
@@ -157,6 +185,13 @@ never edits tracked files.
   "owner": { "pid": 4242, "host": "laptop" } } ] }
 ```
 
+With `[db]` an entry also has `"db": { "provider": "postgres", "name": "hull_fix_login",
+"created": true, "host": "localhost", "port": 5432, "user": "dev" }`: `name` is the postgres
+database, the compose project, or the sqlite path relative to the worktree; `created` is set
+right after `createdb` succeeds (berth drops only what it created); `host`/`port`/`user` are
+recorded for postgres only, so `down` works after config edits. Without `[db]` the field is
+absent (an M1 manifest loads and is written back unchanged); never a URL or password.
+
 `state`: `creating` → `ready` | `failed`; `removing`. `copied` lists paths only, never contents or
 hashes. `env` holds only berth-derived and `[env]` values (§7), which are non-secret by rule.
 
@@ -175,7 +210,25 @@ Per user (ports are machine-wide): `$BERTH_STATE_DIR`, else `$XDG_STATE_HOME/ber
   honours it at plan time), `CARGO_TARGET_DIR=<wt>/target` (a shared target dir serialises
   builds on cargo's lock), `TMPDIR=<wt>/.berth/tmp`.
 - `[env]` values with placeholders `{repo}`, `{task}`, `{task_snake}`, `{port.<name>}`,
-  `{port.base}`, `{worktree}`. Unknown placeholder → exit 3.
+  `{port.base}`, `{worktree}`; with `[db]` also `{db.url}` (when a URL exists), `{db.name}`
+  (postgres, compose) and `{db.path}` (sqlite). Unknown placeholder → exit 3.
+- With `[db]`: the URL as `[db].env` (default `DATABASE_URL`; `""` exports none), and
+  `COMPOSE_PROJECT_NAME=<project>` for compose. `[env]` cannot set either (§4).
+- Default names, unique per checkout: `<h>` is the first 6 hex chars of FNV-1a (64 bit) over the
+  bytes of the main checkout path, so two clones in directories of the same name do not share a
+  database or compose project (`down` in one never touches the other's). Postgres:
+  `<repo>_<h>_<task_snake>`, repo lowercased with other chars as `_`, cut so the whole name is at
+  most 63 bytes (`db` if nothing is left). Compose: `<repo>-<h>-<task>`, repo lowercased with
+  other chars as `-`, leading `-`/`_` trimmed, cut to 30. An explicit `[db].name`/`[db].project`
+  is used as given (still validated). `createdb` failing with "already exists" prints
+  `hint: if database <name> is a leftover, drop it with dropdb <name>, or set [db].name`.
+
+- With `[cache] remote = "hoard"` and a running server (§12), `berth env` adds `TURBO_API` and
+  `TURBO_TEAM=hoard`, read live (never stored in the manifest or `--json`). `sh` ends with
+  `export TURBO_TOKEN="$(cat '<token file>')"` and `fish` with `set -gx TURBO_TOKEN (cat '<token
+  file>')`, so the token is never printed; `dotenv`/`json` omit it and say
+  `note: TURBO_TOKEN is not printed; read it from <token file>` on stderr. Setup and teardown hooks
+  get all three with the real token. No server: nothing exported, one `warning:` on stderr, exit 0.
 
 Formats: `sh` (`export K='v'`, escaped), `fish`, `dotenv`, `json`. Copied files' values are
 never exported: they stay in `.env`, read by the app's own loader.
@@ -190,13 +243,20 @@ never exported: they stay in `.env`, read by the app's own loader.
    checked (`git check-ref-format --branch`, exit 2) and the base resolved (exit 3) here, before
    any lock, port or file. A manifest tracked by git (`git ls-files --error-unmatch
    .agents/worktrees.json`) is exit 3: "run git rm --cached .agents/worktrees.json".
+   With `[db]`: the database name resolves (validation with a stand-in port block, always).
+   For a task with no manifest entry yet (a lock-free peek; `up` on an existing task stays
+   idempotent, §3) the provider's tools are also on `PATH` (`createdb` and `dropdb`, or `docker`;
+   else exit 3) and, for sqlite, the template is a regular file without a pending `-wal` (else
+   exit 3). All before any lock, port or file.
 2. Take the repo lock `<git-common-dir>/berth.lock`. The user lock `<state>/ports.lock` is taken
    in step 4 only. Lock order is always repo → user, so two repos and two tasks cannot deadlock.
 3. Check: task not present (else §3 idempotency; a `creating` entry whose owner is alive → exit 1
    "task is being created by pid N"), path free, `max` not reached, every `[copy]` match is
    ignored by git (`git check-ignore`) — a copy-listed file git would track is refused (exit 1:
-   "add it to .gitignore"), because the agent would commit the secret. Nothing is created on
-   any of these paths.
+   "add it to .gitignore"), because the agent would commit the secret. A sqlite target path git
+   does not ignore is refused the same way. For an existing entry, `(provider, name)` from `[db]`
+   must equal the recorded database (else `drift`: run `berth down <task>`); healthy is item
+   `db <name> ok`. Nothing is created on any of these paths.
 4. Under the user lock: allocate ports (§9) and write `ports.json`; release the user lock.
 5. Still under the repo lock, in this order: add `/.berth/`, `/.agents/.*.tmp.*` and (unless git
    already ignores it) `/.agents/worktrees.json` to `<git-common-dir>/info/exclude`; write the
@@ -205,6 +265,15 @@ never exported: they stay in `.env`, read by the app's own loader.
    merge-base(branch, resolved base)`, and a given `--base` is reported `skipped` with a warning
    on stderr. A failure in this step frees the ports and drops the entry. Release the repo lock.
 6. Copy files (§10). Create `<wt>/.berth/tmp` (`/.berth/` is added to `.git/info/exclude`).
+6a. With `[cache] turbo_seed = "link"|"copy"` (default `off`: nothing happens, no item), unlocked,
+   after the copy: seed `<wt>/.turbo/cache` from `<main>/.turbo/cache` (§12). Never fails `up`:
+   a problem is item `cache turbo skipped` plus a `warning:` on stderr.
+6b. With `[db]`, unlocked, after the seed: create the database (§4): sqlite copies the template,
+   postgres runs `createdb`, compose runs `compose up --detach --wait`. A refused item (sqlite)
+   behaves like a copy refusal (rollback, exit 1). For postgres and compose, a short repo lock
+   then sets `db.created = true` in the manifest; the process may die between `createdb` and that
+   write, so `created` is false after such a crash and `down` never drops the database (it may be
+   someone else's). The setup hook (step 7) sees `$DATABASE_URL` and the other §7 variables.
 7. Run `[setup].run` in the worktree with the §7 env, output → stderr, with the timeout
    (`--no-setup` skips it).
    Each hook runs in its own process group; a timeout or failure kills the whole group. Ctrl-C
@@ -215,9 +284,11 @@ never exported: they stay in `.env`, read by the app's own loader.
 8. Retake the repo lock, set `state: ready` (or `failed`), release. A lock timeout here exits 3
    and says to run `berth down <task>` (setup finished; the entry stays `creating`).
 
-On failure after step 5, berth rolls back (teardown, worktree remove, branch delete if berth made
-it and it has no commits, ports freed) and exits 3 with the failed step and the last 20 hook-output
-lines; `--keep-on-failure` keeps it as `failed` for `down` later. Steps 6-7 run unlocked.
+On failure after step 5, berth rolls back (teardown, database drop if this run created it
+(postgres: `createdb` succeeded; compose: `up` was attempted; `dropdb --force`, errors only warn),
+worktree remove, branch delete if berth made it and it has no commits, ports freed) and exits 3 with the failed step and the last 20 hook-output
+lines; `--keep-on-failure` keeps it as `failed` (database included, `created` as recorded) for `down`
+later. Steps 6-7 run unlocked.
 
 Atomic writes: temp file in the same directory, `fsync`, `rename`. Locks: `std::fs::File::lock`
 (advisory; confirm the stable MSRV at plan time), waiting up to 30 s, then exit 3 naming the lock
@@ -263,8 +334,14 @@ and `doctor` as `drift: interrupted`; `down` cleans it.
 **down**: repo lock → `state: removing`. Refuse (exit 1, nothing changed) when the worktree has
 staged or unstaged changes, or untracked files git does not ignore, unless `--force`. Copied files
 are gitignored by rule (§8.3), so they never block. Commits are safe because the branch is kept;
-`--delete-branch` deletes it only if it is merged into `base` (else refused, exit 1). Then
-teardown hook, `git worktree remove` (`--force` passed through only with berth's `--force`),
+`--delete-branch` deletes it only if it is merged into `base` (else refused, exit 1). "Merged"
+means the branch is an ancestor of `base`, or, with git >= 2.38, `git merge-tree --write-tree
+<base> <branch>` succeeds and yields base's own tree, i.e. every change of the branch is already
+in `base` (squash and rebase merges). `merge-tree --write-tree` writes unreachable objects to
+the object store (harmless; `git gc` prunes them), so the `gc` scan takes no lock and changes no
+berth state but is not strictly write-free. berth never fetches: it compares with the local `base`, so
+`git pull` first; with older git only the ancestor test applies. Then
+teardown hook, the database drop (below), `git worktree remove` (`--force` passed through only with berth's `--force`),
 `git worktree prune`, release ports, drop the manifest entry.
 `down` refuses (exit 1) while a live process is still creating the task, and `--delete-branch`
 resolves `[worktree].base` at that moment. An owner on another host cannot be verified and counts
@@ -277,6 +354,28 @@ may be a real running `up`). `down` only inspects, runs hooks in and removes a p
 right before `git branch -D`; if the branch gained commits it is kept (item `skipped`). If
 `git worktree remove` fails without `--force` (e.g. the hook left untracked files), `down` exits 3
 with a message that says to pass `--force`; the entry stays `removing`.
+The database is dropped from the recorded `db` entry (config edits after `up` change nothing),
+after teardown and before the worktree goes, with the worktree as cwd (the main checkout if it is
+gone): postgres runs `dropdb --if-exists` only when `created` is true (else item `skipped`),
+compose runs `compose down --volumes --remove-orphans` for the recorded project, sqlite needs
+nothing (the file lives in the worktree). A failed drop exits 3 and keeps the entry `removing`
+("fix it and run berth down <task> again, or pass --force"). `--force` adds `--force` to `dropdb`
+and, if the drop still fails, warns and continues (item `db <name> drift`, "not dropped (ignored
+by --force)").
+
+**gc** `[--dry-run] [--delete-branch]`: removes finished tasks, each exactly as `berth down <task>`
+(same locks, refusals, teardown and database drop; never `--force`; `--delete-branch` is passed
+through and the branch is merged by definition). The scan takes no lock. A task is removed only
+when it is `ready`, its path is a registered linked worktree, its branch exists and has at least
+one commit beyond the recorded `base` (a fresh task is never "merged"), the branch is merged into
+the resolved `[worktree].base` (the "merged" rule of `down`, so squash merges count only with git
+>= 2.38; `git pull` first, berth never fetches) and the worktree is clean. Every other entry is
+item `worktree <task> skipped` with `kept: state <s>`, `worktree missing`, `branch missing`, `no
+commits yet`, `not merged into <base>` or `uncommitted changes`. `--dry-run` reports `ok` "would
+remove" and changes nothing. No entries: item `gc repo ok` "nothing to collect". The report's
+`worktrees` lists the entries removed (or that would be). Exit 0; 1 if a `down` refused (its
+refusal items are included); 3 if a `down` failed (an `error <task>` item; the other tasks still
+run). Removals run one after another in manifest order.
 
 **ls**: one row per manifest entry plus unmanaged worktrees under `[worktree].root`
 (`drift: unmanaged`): task, state, branch, ahead/behind, dirty, ports listening, path. Exit 0
@@ -292,6 +391,14 @@ reserved ports re-probed; `creating` entries with dead owners. Exit 1 on any dri
 Lock-free and file-free like `ls`. Manifest, exclude, port and owner checks run only when
 `.agents/worktrees.json` exists. A listening port is drift only when its task is not `ready` or
 its worktree directory is gone.
+With `[db]`: `db tools` is `drift` when `createdb`/`dropdb` (postgres) or `docker` (compose) is
+not on `PATH` (with the install hint); sqlite gets one `db sqlite` item that is `drift` for a
+missing or non-regular template, a non-empty `-wal`, or a target git does not ignore (never exit 3);
+a `ready` postgres entry with `created: false` is `drift` ("database <n> was not recorded as
+created; berth down will leave it"). With `turbo_seed` on and `.turbo/` not ignored: `cache turbo`
+`drift`. With `remote = "hoard"`: `cache hoard ok` with the server URL, or `skipped` "no running
+hoard server" (not drift, no warning, the token is never shown). `doctor` still takes no lock,
+writes no file and never connects to a database or runs `createdb`, `dropdb` or `docker`.
 
 ## 12. Integration with hoard, hull, logbook, hoist
 
@@ -299,8 +406,17 @@ its worktree directory is gone.
   keys are immutable with if-not-exists writes, so many worktrees can share one remote safely. M2:
   `[cache] remote = "hoard"` makes `berth env` export `TURBO_API`/`TURBO_TOKEN`/`TURBO_TEAM` for a
   `hoard serve --storage fs` the user (or a hull hook) runs; berth does not start or supervise it
-  (no daemon). M2 also evaluates hard-linking the main checkout's `.turbo/cache` entries into a new
-  worktree (valid only if turbo never rewrites entries in place; verify).
+  (no daemon). berth reads `<main>/<hoard_dir>/port` (u16) and `token` (non-empty) live, since
+  `hoard serve` writes them in its cwd (`./.hoard/`; default `hoard_dir = ".hoard"`) and may
+  restart on another port; either missing or invalid means no server (§7 for the output rules).
+  The token is a secret: only hook environments get its value, and `-v` never logs it. `[cache] turbo_seed = "link"|"copy"` (default `off`) seeds a new worktree's
+  `.turbo/cache` from the main checkout's: top-level regular files only (no symlinks,
+  subdirectories or `*.tmp`), existing targets kept; `link` hard-links and copies any file it cannot
+  link, `copy` always copies (temp + rename). Skipped (item `skipped`) when `.turbo/` is not
+  gitignored (the worktree would be dirty and `down` would refuse) or the source is missing.
+  Hard links are safe because turbo writes archive, `-meta.json` and `-manifest.json` to a temp
+  file and renames it, and eviction unlinks; no entry is rewritten in place (turbo `v2.11.8` and
+  `main`, `crates/turborepo-cache/src/fs.rs`; older versions unchecked, use `copy`).
 - **hull** (a later step, separate plan in hull): base renders `berth.toml` (seed), the
   `.agents/worktrees.json` ignore line, a `berth` skill (when to call `up`/`env`/`down`, read the
   JSON, never read copied files), a SessionStart hook snippet that exports `berth env` when the
@@ -380,6 +496,24 @@ All fetching-free; versions are **not** stated here and are pinned exactly in th
   `node_modules/.vite` appears. Whether `VITE_CACHE_PATH` is honoured by `vp run` stays unverified.
   Two worktrees ran `pnpm run ci` (21/21 tasks, exit 0) and two `vp dev` servers on their own
   `WEB_PORT` at the same time.
+- Verified 2026-10-21 (M2 plan and dogfood): turbo `crates/turborepo-cache/src/fs.rs` at `v2.11.8`
+  and `main` writes every cache file (archive, `-meta.json`, `-manifest.json`) to a temp file and
+  renames it; eviction unlinks. No entry is rewritten in place, so hard-linked seeds are safe.
+  hoard (`ed8074a`): `hoard serve` writes `./.hoard/port` and `./.hoard/token` (random unless
+  `--port`/`--token`); `hoard env` exports `TURBO_API=http://127.0.0.1:<port>`, `TURBO_TOKEN`,
+  `TURBO_TEAM=hoard`. PostgreSQL 16.15: `createdb --template` waits 5 s for template sessions, then
+  fails; names over 63 bytes are silently truncated; `dropdb --if-exists` is idempotent; `dropdb
+  --force` ends sessions; two concurrent `createdb` from one template both succeed. Docker Compose
+  v5.6.0: `--project-name P down --volumes --remove-orphans` works without the compose file and is
+  idempotent; `up --detach --wait` waits for health; project names `^[a-z0-9][a-z0-9_-]*$`.
+  git 2.38+ `merge-tree --write-tree` is used for squash-aware "merged".
+- M2 dogfood 2026-10-21 (example-app, turbo 2.11.8, pnpm 12.11.2, PG 16.15, hoard from source):
+  `up a`/`up b` at once, 1.3 s wall, 63 cache entries hard-linked into each, two databases from
+  one template; `pnpm run check && pnpm run build` FULL TURBO in both at once (1.7 s vs 12.6 s cold
+  in the main checkout); main `.turbo/cache` unchanged; an edit run in `a` uploaded 4 artifacts to
+  hoard and `b` then hit them (18/18 cached); `gc` removed the merged task (database dropped) and
+  kept the fresh one; after `down b` no task databases, no port blocks. sqlite and compose
+  (Docker 29.9.1) smoke-tested on a scratch repo.
 - Claude Code: `.worktreeinclude` format, worktree-create/remove hook names and payload, and the
   SessionStart env-file mechanism; Codex equivalents if any.
 
@@ -391,7 +525,7 @@ All fetching-free; versions are **not** stated here and are pinned exactly in th
 2. **M2 — services** — DB providers behind `[db]`: `sqlite` (copy a template file), `postgres`
    (`createdb -T <template>` / `dropdb`, local server), `compose` (per-task `COMPOSE_PROJECT_NAME`
    and port mapping); hoard remote-cache export; turbo cache seeding; `berth gc` (remove `ready`
-   tasks whose branch is merged and worktree clean).
+   tasks whose branch is merged and worktree clean). Done 2026-10-21, plan `2026-10-21-berth-m2.md`.
 3. **M3 — distribution and integration** — release via hoist, npm launcher, Windows; hull renders
    `berth.toml`, skill, hooks and statusline segment; D-00x in `keelstackhq/decisions`.
 4. **Later, with evidence** — hosted DB branches (network + token; maybe hoist's), cross-agent

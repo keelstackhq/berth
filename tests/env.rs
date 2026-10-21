@@ -3,6 +3,8 @@ use std::path::Path;
 use std::process::Command;
 
 use berth::cli::Format;
+use berth::config::DbCfg;
+use berth::db::{DbPlan, resolve};
 use berth::env::{EnvInput, build_env, expand, format_env};
 use berth::manifest::PortBlock;
 
@@ -23,6 +25,7 @@ fn berth_vars_and_named_ports() {
         task: "fix-login",
         ports: &ports,
         extra: &extra,
+        db: None,
     })
     .unwrap();
     assert_eq!(env["BERTH_TASK"], "fix-login");
@@ -59,6 +62,7 @@ fn extra_values_are_expanded() {
         task: "fix-login",
         ports: &ports,
         extra: &extra,
+        db: None,
     })
     .unwrap();
     assert_eq!(
@@ -78,6 +82,7 @@ fn bad_extra_names_the_key() {
         task: "t",
         ports: &ports,
         extra: &extra,
+        db: None,
     })
     .unwrap_err()
     .to_string();
@@ -160,4 +165,130 @@ fn json_is_one_sorted_object() {
     let v: serde_json::Value = serde_json::from_str(&out).unwrap();
     assert_eq!(v["A"], "it's");
     assert_eq!(v["E"], "two\nlines");
+}
+
+/// The default-name hash for the fixed main path `/main` used by `plan`.
+fn h() -> String {
+    format!("{:016x}", berth::ports::fnv1a64(b"/main"))[..6].to_string()
+}
+
+fn plan(toml_src: &str, repo: &str, task: &str, wt: &str) -> DbPlan {
+    let cfg: DbCfg = toml::from_str(toml_src).unwrap();
+    resolve(
+        &cfg,
+        repo,
+        Path::new("/main"),
+        task,
+        Path::new(wt),
+        &block(),
+    )
+    .unwrap()
+}
+
+fn env_with(
+    plan: &DbPlan,
+    extra: &BTreeMap<String, String>,
+) -> Result<BTreeMap<String, String>, berth::BerthError> {
+    build_env(&EnvInput {
+        repo_name: "hull",
+        main: Path::new("/r/hull"),
+        worktree: Path::new("/w"),
+        task: "fix-login",
+        ports: &block(),
+        extra,
+        db: Some(plan),
+    })
+}
+
+#[test]
+fn db_url_and_compose_project_are_exported() {
+    let pg = plan("provider = \"postgres\"", "hull", "fix-login", "/w");
+    let env = env_with(&pg, &BTreeMap::new()).unwrap();
+    assert_eq!(
+        env["DATABASE_URL"],
+        format!("postgres://localhost:5432/hull_{}_fix_login", h())
+    );
+    assert!(!env.contains_key("COMPOSE_PROJECT_NAME"));
+
+    let c = plan(
+        "provider = \"compose\"\nurl = \"postgres://u@localhost:{port.api}/{db.name}\"",
+        "hull",
+        "fix-login",
+        "/w",
+    );
+    let env = env_with(&c, &BTreeMap::new()).unwrap();
+    assert_eq!(
+        env["COMPOSE_PROJECT_NAME"],
+        format!("hull-{}-fix-login", h())
+    );
+    assert_eq!(
+        env["DATABASE_URL"],
+        format!("postgres://u@localhost:21341/hull-{}-fix-login", h())
+    );
+
+    let c = plan("provider = \"compose\"", "hull", "fix-login", "/w");
+    let env = env_with(&c, &BTreeMap::new()).unwrap();
+    assert!(!env.contains_key("DATABASE_URL"));
+
+    let e = plan("provider = \"postgres\"\nenv = \"\"", "hull", "t", "/w");
+    assert!(
+        !env_with(&e, &BTreeMap::new())
+            .unwrap()
+            .contains_key("DATABASE_URL")
+    );
+}
+
+#[test]
+fn env_values_use_db_placeholders() {
+    let pg = plan("provider = \"postgres\"", "hull", "fix-login", "/w");
+    let extra = BTreeMap::from([
+        ("A".to_string(), "{db.url}".to_string()),
+        ("B".to_string(), "n={db.name}".to_string()),
+    ]);
+    let env = env_with(&pg, &extra).unwrap();
+    assert_eq!(
+        env["A"],
+        format!("postgres://localhost:5432/hull_{}_fix_login", h())
+    );
+    assert_eq!(env["B"], format!("n=hull_{}_fix_login", h()));
+
+    let sq = plan(
+        "provider = \"sqlite\"\ntemplate = \"db/dev.sqlite\"",
+        "hull",
+        "t",
+        "/w",
+    );
+    let extra = BTreeMap::from([("P".to_string(), "{db.path}".to_string())]);
+    assert_eq!(env_with(&sq, &extra).unwrap()["P"], "/w/db/dev.sqlite");
+}
+
+#[test]
+fn db_path_with_postgres_is_unknown() {
+    let pg = plan("provider = \"postgres\"", "hull", "t", "/w");
+    let extra = BTreeMap::from([("P".to_string(), "{db.path}".to_string())]);
+    let err = env_with(&pg, &extra).unwrap_err().to_string();
+    assert!(
+        err.contains("unknown placeholder {db.path} in [env].P"),
+        "{err}"
+    );
+}
+
+#[test]
+fn db_placeholder_without_db_is_unknown() {
+    let extra = BTreeMap::from([("P".to_string(), "{db.url}".to_string())]);
+    let err = build_env(&EnvInput {
+        repo_name: "hull",
+        main: Path::new("/r"),
+        worktree: Path::new("/w"),
+        task: "t",
+        ports: &block(),
+        extra: &extra,
+        db: None,
+    })
+    .unwrap_err()
+    .to_string();
+    assert!(
+        err.contains("unknown placeholder {db.url} in [env].P"),
+        "{err}"
+    );
 }

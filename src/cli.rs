@@ -35,6 +35,8 @@ pub enum Command {
     Ls,
     /// Print the environment of a workspace
     Env(EnvArgs),
+    /// Remove finished tasks (merged, clean, ready)
+    Gc(GcArgs),
     /// Check berth's state against git and the machine
     Doctor,
 }
@@ -46,6 +48,7 @@ impl Command {
             Command::Down(_) => "down",
             Command::Ls => "ls",
             Command::Env(_) => "env",
+            Command::Gc(_) => "gc",
             Command::Doctor => "doctor",
         }
     }
@@ -75,6 +78,16 @@ pub struct DownArgs {
     #[arg(long)]
     pub force: bool,
     /// Also delete the task branch if it is merged
+    #[arg(long)]
+    pub delete_branch: bool,
+}
+
+#[derive(Debug, Args)]
+pub struct GcArgs {
+    /// Report what would be removed; change nothing
+    #[arg(long)]
+    pub dry_run: bool,
+    /// Also delete the branches of removed tasks (they are merged)
     #[arg(long)]
     pub delete_branch: bool,
 }

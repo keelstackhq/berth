@@ -1,0 +1,42 @@
+---
+source: tests/cli_gc.rs
+expression: items
+---
+[
+  {
+    "action": "skipped",
+    "key": "broken",
+    "kind": "worktree",
+    "reason": "kept: state failed"
+  },
+  {
+    "action": "skipped",
+    "key": "dirty",
+    "kind": "worktree",
+    "reason": "kept: uncommitted changes"
+  },
+  {
+    "action": "skipped",
+    "key": "fresh",
+    "kind": "worktree",
+    "reason": "kept: no commits yet"
+  },
+  {
+    "action": "ok",
+    "key": "merged",
+    "kind": "worktree",
+    "reason": "would remove"
+  },
+  {
+    "action": "skipped",
+    "key": "open",
+    "kind": "worktree",
+    "reason": "kept: not merged into HEAD"
+  },
+  {
+    "action": "ok",
+    "key": "squashed",
+    "kind": "worktree",
+    "reason": "would remove"
+  }
+]

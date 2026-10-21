@@ -1,17 +1,20 @@
 //! `berth up` (spec §8): create the worktree of a task, or confirm the one that exists.
 
+use std::cell::Cell;
 use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use crate::cache;
 use crate::cli::UpArgs;
-use crate::config::{self, Config};
+use crate::config::{self, Config, Provider, Seed};
 use crate::copy;
+use crate::db::{self, DbPlan};
 use crate::env::{EnvInput, build_env, sh_quote};
 use crate::git::{self, Repo};
 use crate::hooks::run_hooks;
 use crate::lock::{self, LockGuard};
-use crate::manifest::{Entry, Manifest, Owner, PortBlock, SetupStatus, State};
+use crate::manifest::{DbEntry, Entry, Manifest, Owner, PortBlock, SetupStatus, State};
 use crate::ports::{self, BindProber};
 use crate::registry::{self, Block, Registry};
 use crate::report::{Action, Item, Report};
@@ -105,6 +108,21 @@ pub fn up(ctx: &Ctx, args: &UpArgs) -> Result<Report, BerthError> {
         )));
     }
     let path = worktree_path(repo, &cfg, task);
+    let mut sqlite_refusal = None;
+    if let Some(dbcfg) = &cfg.db {
+        // Validation only: ports are digits, so the real block cannot change a name's validity.
+        let stand_in = PortBlock::new(cfg.ports.range[0], cfg.ports.count, &cfg.ports.names());
+        db::resolve(dbcfg, &repo.name, main, task, &path, &stand_in)?;
+        // Tools and the sqlite template matter only when `up` will create the database; an
+        // existing task must stay confirmable (lock-free peek, re-checked under the lock).
+        let known = Manifest::load(main)?.find(task).is_some();
+        if !known {
+            db::check_tools(dbcfg)?;
+        }
+        if !known && dbcfg.provider == Provider::Sqlite {
+            sqlite_refusal = db::check_sqlite(main, dbcfg)?;
+        }
+    }
     let state = registry::state_dir()?;
 
     // 2. Repo lock.
@@ -113,9 +131,10 @@ pub fn up(ctx: &Ctx, args: &UpArgs) -> Result<Report, BerthError> {
     // 3. An existing entry is confirmed or reported; otherwise check before creating anything.
     let mut manifest = Manifest::load(main)?;
     if let Some(entry) = manifest.find(task) {
-        return Ok(existing(entry, args, &cfg, &base_sha));
+        return existing(entry, args, &cfg, repo, &base_sha);
     }
     let mut refused = Vec::new();
+    refused.extend(sqlite_refusal);
     if std::fs::symlink_metadata(&path).is_ok() {
         refused.push(Item::new(
             "worktree",
@@ -167,6 +186,7 @@ pub fn up(ctx: &Ctx, args: &UpArgs) -> Result<Report, BerthError> {
         entry,
         branch_existed,
         root_created,
+        db: db_plan,
         mut items,
     } = match created {
         Ok(created) => created,
@@ -179,6 +199,8 @@ pub fn up(ctx: &Ctx, args: &UpArgs) -> Result<Report, BerthError> {
     drop(repo_guard);
     sys::test_pause("after_worktree");
 
+    // Hooks (setup and rollback teardown) get the hoard variables; nothing else does.
+    let hook_env = cache::hook_env(&entry.env, cache::hoard(main, &cfg.cache).as_ref());
     let job = Job {
         repo,
         cfg: &cfg,
@@ -190,6 +212,9 @@ pub fn up(ctx: &Ctx, args: &UpArgs) -> Result<Report, BerthError> {
         branch_existed,
         root_created,
         env: &entry.env,
+        hook_env: &hook_env,
+        db: entry.db.clone(),
+        db_created: Cell::new(false),
     };
 
     // 6. Copy (unlocked).
@@ -215,6 +240,56 @@ pub fn up(ctx: &Ctx, args: &UpArgs) -> Result<Report, BerthError> {
     }
     sys::test_pause("after_copy");
 
+    // 6a. Turbo cache seed (unlocked); never fails `up`.
+    let mut cache_items = Vec::new();
+    if cfg.cache.turbo_seed != Seed::Off {
+        cache_items.push(cache::seed_turbo(main, &path, cfg.cache.turbo_seed));
+    }
+
+    // 6b. Database (unlocked), after the seed.
+    let mut db_items = Vec::new();
+    if let (Some(dbcfg), Some(plan)) = (&cfg.db, &db_plan) {
+        // compose: `up` may start containers before it fails, so an attempt is enough to undo.
+        if plan.provider == Provider::Compose {
+            job.db_created.set(true);
+        }
+        let item = match db::create(main, &path, dbcfg, plan, &entry.env) {
+            Ok(item) => item,
+            Err(err) => {
+                if plan.provider == Provider::Postgres {
+                    eprintln!(
+                        "hint: if database {0} is a leftover, drop it with dropdb {0}, or set [db].name",
+                        plan.name
+                    );
+                }
+                job.fail(args.keep_on_failure, &copied, setup_status("skipped", 0.0));
+                return Err(err);
+            }
+        };
+        if item.action == Action::Refused {
+            job.fail(args.keep_on_failure, &copied, setup_status("skipped", 0.0));
+            let mut report = Report::new("up");
+            report.items = copy_items;
+            report.items.push(item);
+            report.exit_code = 1;
+            return Ok(report);
+        }
+        if plan.provider != Provider::Sqlite {
+            job.db_created.set(true);
+            sys::test_pause("after_db_create");
+            if let Err(err) = mark_db_created(repo, task) {
+                // The entry cannot record the database, so `down` would never drop it: drop it
+                // now even with --keep-on-failure.
+                if args.keep_on_failure {
+                    job.drop_db();
+                }
+                job.fail(args.keep_on_failure, &copied, setup_status("skipped", 0.0));
+                return Err(err);
+            }
+        }
+        db_items.push(item);
+    }
+
     // 7. Setup (unlocked).
     let setup = if args.no_setup {
         SetupStatus {
@@ -224,7 +299,7 @@ pub fn up(ctx: &Ctx, args: &UpArgs) -> Result<Report, BerthError> {
     } else {
         let started = Instant::now();
         let timeout = Duration::from_secs(cfg.setup.timeout_secs);
-        match run_hooks("setup", &cfg.setup.run, &path, &entry.env, timeout) {
+        match run_hooks("setup", &cfg.setup.run, &path, &hook_env, timeout) {
             Ok(secs) => SetupStatus {
                 status: "ok".into(),
                 secs,
@@ -268,6 +343,8 @@ pub fn up(ctx: &Ctx, args: &UpArgs) -> Result<Report, BerthError> {
     all.push(items.remove(0));
     all.push(ports_item(&entry.ports, Action::Create));
     all.extend(copy_items);
+    all.append(&mut cache_items);
+    all.append(&mut db_items);
     all.extend(plan.skipped);
     all.append(&mut items);
     let setup_reason = if args.no_setup {
@@ -288,7 +365,13 @@ pub fn up(ctx: &Ctx, args: &UpArgs) -> Result<Report, BerthError> {
 }
 
 /// Step 3 for a task already in the manifest: refused, drift, or every item `ok`.
-fn existing(entry: &Entry, args: &UpArgs, cfg: &Config, base_sha: &str) -> Report {
+fn existing(
+    entry: &Entry,
+    args: &UpArgs,
+    cfg: &Config,
+    repo: &Repo,
+    base_sha: &str,
+) -> Result<Report, BerthError> {
     let task = entry.task.as_str();
     let mut report = Report::new("up");
     report.worktrees = vec![entry.clone()];
@@ -301,7 +384,7 @@ fn existing(entry: &Entry, args: &UpArgs, cfg: &Config, base_sha: &str) -> Repor
             format!("task is being created by pid {}", entry.owner.pid),
         ));
         report.exit_code = 1;
-        return report;
+        return Ok(report);
     }
     let mut drift = Vec::new();
     if args.base.is_some() && base_sha != entry.base {
@@ -338,6 +421,30 @@ fn existing(entry: &Entry, args: &UpArgs, cfg: &Config, base_sha: &str) -> Repor
             ),
         ));
     }
+    let have = entry
+        .db
+        .as_ref()
+        .map(|d| format!("{} {}", d.provider, d.name));
+    let want = match &cfg.db {
+        Some(d) => {
+            let plan = db::resolve(d, &repo.name, &repo.main, task, &entry.path, &entry.ports)?;
+            Some(format!("{} {}", plan.provider.as_str(), plan.name))
+        }
+        None => None,
+    };
+    if have != want {
+        let show = |v: &Option<String>| v.clone().unwrap_or_else(|| "none".into());
+        drift.push(Item::new(
+            "db",
+            task,
+            Action::Drift,
+            format!(
+                "task has database {}; [db] now gives {}; run `berth down {task}` to change it",
+                show(&have),
+                show(&want)
+            ),
+        ));
+    }
     let state_drift = match entry.state {
         State::Creating => Some(format!(
             "interrupted: owner pid {} is gone; run `berth down {task}` first",
@@ -358,7 +465,7 @@ fn existing(entry: &Entry, args: &UpArgs, cfg: &Config, base_sha: &str) -> Repor
     if !drift.is_empty() {
         report.items = drift;
         report.exit_code = 1;
-        return report;
+        return Ok(report);
     }
     report.items.push(Item::new(
         "worktree",
@@ -370,6 +477,11 @@ fn existing(entry: &Entry, args: &UpArgs, cfg: &Config, base_sha: &str) -> Repor
         .items
         .push(Item::new("branch", &entry.branch, Action::Ok, "exists"));
     report.items.push(ports_item(&entry.ports, Action::Ok));
+    if let Some(d) = &entry.db {
+        report
+            .items
+            .push(Item::new("db", &d.name, Action::Ok, d.provider.clone()));
+    }
     for path in &entry.copied {
         report
             .items
@@ -382,7 +494,7 @@ fn existing(entry: &Entry, args: &UpArgs, cfg: &Config, base_sha: &str) -> Repor
         entry.setup.status.clone(),
     ));
     report.hint = Some(hint(&entry.path));
-    report
+    Ok(report)
 }
 
 /// Step 4: allocate and record a block. Caller holds the repo lock; this takes the user lock and
@@ -446,6 +558,7 @@ struct Created {
     entry: Entry,
     branch_existed: bool,
     root_created: bool,
+    db: Option<DbPlan>,
     items: Vec<Item>,
 }
 
@@ -499,6 +612,11 @@ fn create_worktree(
         (base_sha.to_string(), item)
     };
 
+    let db_plan = cfg
+        .db
+        .as_ref()
+        .map(|d| db::resolve(d, &repo.name, main, task, path, &ports))
+        .transpose()?;
     let env = build_env(&EnvInput {
         repo_name: &repo.name,
         main,
@@ -506,6 +624,7 @@ fn create_worktree(
         task,
         ports: &ports,
         extra: &cfg.env,
+        db: db_plan.as_ref(),
     })?;
     let entry = Entry {
         task: task.to_string(),
@@ -525,6 +644,11 @@ fn create_worktree(
             pid: std::process::id(),
             host: sys::hostname(),
         },
+        db: cfg
+            .db
+            .as_ref()
+            .zip(db_plan.as_ref())
+            .map(|(c, p)| db::entry(p, c)),
     };
     manifest.upsert(entry.clone());
     manifest.save(main)?;
@@ -543,6 +667,7 @@ fn create_worktree(
         entry,
         branch_existed: existed,
         root_created,
+        db: db_plan,
         items,
     })
 }
@@ -574,6 +699,21 @@ fn remove_entry(main: &Path, task: &str) -> Result<(), BerthError> {
     Ok(())
 }
 
+/// Record `db.created = true` once the database exists (short repo lock).
+fn mark_db_created(repo: &Repo, task: &str) -> Result<(), BerthError> {
+    let _guard = repo_lock(repo)?;
+    let mut manifest = Manifest::load(&repo.main)?;
+    if let Some(db) = manifest
+        .worktrees
+        .iter_mut()
+        .find(|e| e.task == task)
+        .and_then(|e| e.db.as_mut())
+    {
+        db.created = true;
+    }
+    manifest.save(&repo.main)
+}
+
 /// What a failure after step 5 needs to undo or keep.
 struct Job<'a> {
     repo: &'a Repo,
@@ -586,6 +726,11 @@ struct Job<'a> {
     branch_existed: bool,
     root_created: bool,
     env: &'a BTreeMap<String, String>,
+    /// `env` plus the hoard variables, for hooks only.
+    hook_env: &'a BTreeMap<String, String>,
+    db: Option<DbEntry>,
+    /// This run created the database (postgres) or started the compose project.
+    db_created: Cell<bool>,
 }
 
 impl Job<'_> {
@@ -611,7 +756,28 @@ impl Job<'_> {
         manifest.save(main)
     }
 
-    /// Teardown (errors ignored), remove the worktree, delete the branch if berth made it and it
+    /// Drop the database (or stop the compose project) this run created; errors are warnings.
+    fn drop_db(&self) {
+        let main = &self.repo.main;
+        if let Some(db) = self.db.as_ref().filter(|_| self.db_created.get()) {
+            let mut record = db.clone();
+            record.created = true;
+            let cwd = if self.path.is_dir() { self.path } else { main };
+            let timeout = self
+                .cfg
+                .db
+                .as_ref()
+                .map_or(Duration::from_secs(300), |d| d.timeout());
+            // `--force`: berth made this database moments ago; stray sessions must not leak it.
+            cleanup(
+                "drop the database",
+                db::drop(main, cwd, &record, true, self.env, timeout).map(drop),
+            );
+        }
+    }
+
+    /// Teardown (errors ignored), drop the database this run created (errors are warnings),
+    /// remove the worktree, delete the branch if berth made it and it
     /// has no commits, free the ports, drop the entry. One lock at a time.
     fn rollback(&self) {
         let main = &self.repo.main;
@@ -621,10 +787,11 @@ impl Job<'_> {
                 "teardown",
                 &self.cfg.teardown.run,
                 self.path,
-                self.env,
+                self.hook_env,
                 timeout,
             );
         }
+        self.drop_db();
         cleanup(
             "remove the worktree",
             git::worktree_remove(main, self.path, true),

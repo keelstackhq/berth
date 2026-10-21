@@ -4,8 +4,10 @@
 use std::path::Path;
 use std::time::Duration;
 
+use crate::cache;
 use crate::cli::DownArgs;
 use crate::config;
+use crate::db;
 use crate::git;
 use crate::hooks::run_hooks;
 use crate::manifest::{Entry, Manifest, State};
@@ -15,9 +17,18 @@ use crate::report::{Action, Item, Report};
 use crate::{BerthError, Ctx, sys};
 
 pub fn down(ctx: &Ctx, args: &DownArgs) -> Result<Report, BerthError> {
+    down_task(ctx, args.task.as_str(), args.force, args.delete_branch)
+}
+
+/// `berth down <task>` for a task name already validated (also used by `gc`).
+pub(crate) fn down_task(
+    ctx: &Ctx,
+    task: &str,
+    force: bool,
+    delete_branch: bool,
+) -> Result<Report, BerthError> {
     let repo = &ctx.repo;
     let main = &repo.main;
-    let task = args.task.as_str();
     let state = registry::state_dir()?;
 
     // 1. Repo lock. A task without an entry may still own a block a crashed `up` left behind.
@@ -40,7 +51,7 @@ pub fn down(ctx: &Ctx, args: &DownArgs) -> Result<Report, BerthError> {
     // `--force` may override it; a live pid on this host may be a real `up` and always refuses.
     if entry.state == State::Creating && sys::pid_alive(entry.owner.pid, &entry.owner.host) {
         let foreign = entry.owner.host != sys::hostname();
-        if !(foreign && args.force) {
+        if !(foreign && force) {
             let reason = if foreign {
                 format!(
                     "task is being created by pid {} on another host ({}); cannot verify; \
@@ -62,7 +73,7 @@ pub fn down(ctx: &Ctx, args: &DownArgs) -> Result<Report, BerthError> {
 
     // 3 and 4. Refusals change nothing.
     let mut refusals = Vec::new();
-    if registered && path.exists() && !args.force && git::dirty(&path)? {
+    if registered && path.exists() && !force && git::dirty(&path)? {
         refusals.push(Item::new(
             "worktree",
             task,
@@ -71,9 +82,9 @@ pub fn down(ctx: &Ctx, args: &DownArgs) -> Result<Report, BerthError> {
         ));
     }
     let branch_present = git::branch_exists(main, &entry.branch)?;
-    if args.delete_branch && branch_present {
+    if delete_branch && branch_present {
         let base = git::resolve_commit(main, &cfg.worktree.base)?;
-        if !git::is_ancestor(main, &entry.branch, &base)? {
+        if !git::is_merged(main, &entry.branch, &base)? {
             refusals.push(Item::new(
                 "branch",
                 &entry.branch,
@@ -105,8 +116,10 @@ pub fn down(ctx: &Ctx, args: &DownArgs) -> Result<Report, BerthError> {
         ));
     } else if registered {
         let timeout = Duration::from_secs(cfg.teardown.timeout_secs);
-        if let Err(err) = run_hooks("teardown", &cfg.teardown.run, &path, &entry.env, timeout) {
-            if !args.force {
+        let hoard = cache::hoard(main, &cfg.cache).filter(|_| !cfg.teardown.run.is_empty());
+        let hook_env = cache::hook_env(&entry.env, hoard.as_ref());
+        if let Err(err) = run_hooks("teardown", &cfg.teardown.run, &path, &hook_env, timeout) {
+            if !force {
                 return Err(err);
             }
             eprintln!("warning: {err}");
@@ -116,6 +129,37 @@ pub fn down(ctx: &Ctx, args: &DownArgs) -> Result<Report, BerthError> {
                 Action::Drift,
                 "teardown failed (ignored by --force)",
             ));
+        }
+    }
+
+    // 6b. The database, before its worktree goes (sqlite lives in the worktree and needs nothing).
+    if let Some(record) = &entry.db {
+        let cwd = if registered && path.exists() {
+            &path
+        } else {
+            main
+        };
+        let timeout = cfg
+            .db
+            .as_ref()
+            .map_or(Duration::from_secs(300), |d| d.timeout());
+        match db::drop(main, cwd, record, force, &entry.env, timeout) {
+            Ok(item) => items.extend(item),
+            Err(err) if force => {
+                eprintln!("warning: {err}");
+                items.push(Item::new(
+                    "db",
+                    &record.name,
+                    Action::Drift,
+                    "not dropped (ignored by --force)",
+                ));
+            }
+            Err(err) => {
+                return Err(BerthError::Env(format!(
+                    "{err}; the entry stays `removing`: fix it and run berth down {task} again, \
+                     or pass --force"
+                )));
+            }
         }
     }
 
@@ -133,8 +177,8 @@ pub fn down(ctx: &Ctx, args: &DownArgs) -> Result<Report, BerthError> {
         ));
     } else {
         if path.exists() {
-            git::worktree_remove(main, &path, args.force).map_err(|err| match err {
-                BerthError::Git { .. } if !args.force => BerthError::Env(format!(
+            git::worktree_remove(main, &path, force).map_err(|err| match err {
+                BerthError::Git { .. } if !force => BerthError::Env(format!(
                     "{err}; the entry stays `removing`: fix that or pass --force to remove it anyway"
                 )),
                 other => other,
@@ -153,10 +197,10 @@ pub fn down(ctx: &Ctx, args: &DownArgs) -> Result<Report, BerthError> {
     let mut manifest = Manifest::load(main)?;
     manifest.remove(task);
     manifest.save(main)?;
-    if args.delete_branch && branch_present {
+    if delete_branch && branch_present {
         // The teardown hook may have committed since the check in step 4: never lose commits.
         let merged = git::resolve_commit(main, &cfg.worktree.base)
-            .and_then(|base| git::is_ancestor(main, &entry.branch, &base))
+            .and_then(|base| git::is_merged(main, &entry.branch, &base))
             .map_err(|err| {
                 BerthError::Env(format!(
                     "{err}; the worktree and ports were already removed and branch {} was kept; \
@@ -195,7 +239,7 @@ fn refused(items: Vec<Item>, entry: &Entry) -> Report {
 }
 
 /// True when `path` is a linked worktree git knows about (never the main checkout).
-fn is_registered_worktree(main: &Path, path: &Path) -> Result<bool, BerthError> {
+pub(crate) fn is_registered_worktree(main: &Path, path: &Path) -> Result<bool, BerthError> {
     let want = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     if want == main {
         return Ok(false);

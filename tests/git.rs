@@ -318,3 +318,87 @@ fn branch_name_rejects_reflog_syntax() {
         );
     }
 }
+
+fn commit_file(dir: &Path, name: &str, body: &str) {
+    write(dir, name, body);
+    run_git(dir, &["add", name]);
+    run_git(dir, &["commit", "-q", "-m", name]);
+}
+
+fn squash_capable() -> bool {
+    if git::version().unwrap() >= (2, 38) {
+        true
+    } else {
+        eprintln!("git < 2.38: squash-merge detection is unavailable; test skipped");
+        false
+    }
+}
+
+#[test]
+fn version_is_at_least_the_minimum() {
+    assert!(git::version().unwrap() >= (2, 36));
+}
+
+#[test]
+fn is_merged_fast_forward_and_unmerged() {
+    let fx = Fixture::new();
+    let main = canon(&fx.repo);
+    run_git(&main, &["checkout", "-q", "-b", "feat"]);
+    commit_file(&main, "f1", "1");
+    run_git(&main, &["checkout", "-q", "main"]);
+    assert!(!git::is_merged(&main, "feat", "main").unwrap());
+    run_git(&main, &["merge", "-q", "--ff-only", "feat"]);
+    assert!(git::is_merged(&main, "feat", "main").unwrap());
+}
+
+#[test]
+fn is_merged_squash() {
+    if !squash_capable() {
+        return;
+    }
+    let fx = Fixture::new();
+    let main = canon(&fx.repo);
+    run_git(&main, &["checkout", "-q", "-b", "feat"]);
+    commit_file(&main, "f1", "1");
+    commit_file(&main, "f2", "2");
+    run_git(&main, &["checkout", "-q", "main"]);
+    commit_file(&main, "m1", "m");
+    assert!(!git::is_merged(&main, "feat", "main").unwrap());
+    run_git(&main, &["merge", "-q", "--squash", "feat"]);
+    run_git(&main, &["commit", "-q", "-m", "squash"]);
+    assert!(!git::is_ancestor(&main, "feat", "main").unwrap());
+    assert!(git::is_merged(&main, "feat", "main").unwrap());
+}
+
+#[test]
+fn is_merged_false_when_change_was_reverted_on_base() {
+    let fx = Fixture::new();
+    let main = canon(&fx.repo);
+    run_git(&main, &["checkout", "-q", "-b", "feat"]);
+    commit_file(&main, "f1", "1");
+    run_git(&main, &["checkout", "-q", "main"]);
+    run_git(&main, &["merge", "-q", "--squash", "feat"]);
+    run_git(&main, &["commit", "-q", "-m", "squash"]);
+    run_git(&main, &["rm", "-q", "f1"]);
+    run_git(&main, &["commit", "-q", "-m", "revert squash"]);
+    assert!(!git::is_merged(&main, "feat", "main").unwrap());
+}
+
+#[test]
+fn is_merged_false_when_branch_conflicts_with_base() {
+    let fx = Fixture::new();
+    let main = canon(&fx.repo);
+    run_git(&main, &["checkout", "-q", "-b", "feat"]);
+    commit_file(&main, "c.txt", "feature side\n");
+    run_git(&main, &["checkout", "-q", "main"]);
+    commit_file(&main, "c.txt", "main side\n");
+    assert!(!git::is_merged(&main, "feat", "main").unwrap());
+}
+
+#[test]
+fn is_merged_unknown_ref_is_env_error() {
+    let fx = Fixture::new();
+    let main = canon(&fx.repo);
+    let err = git::is_merged(&main, "nope", "main").unwrap_err();
+    assert!(matches!(err, BerthError::Env(_)), "{err}");
+}

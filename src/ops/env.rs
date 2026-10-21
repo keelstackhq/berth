@@ -2,8 +2,10 @@
 
 use std::path::PathBuf;
 
-use crate::cli::EnvArgs;
-use crate::env::format_env;
+use crate::cache;
+use crate::cli::{EnvArgs, Format};
+use crate::config;
+use crate::env::{format_env, format_env_hoard};
 use crate::manifest::Manifest;
 use crate::report::Report;
 use crate::{BerthError, Ctx};
@@ -29,7 +31,26 @@ pub fn env(ctx: &Ctx, args: &EnvArgs) -> Result<Report, BerthError> {
         }
     };
     let mut report = Report::new("env");
-    report.text = Some(format_env(&entry.env, args.format));
+    // A broken berth.toml must not hide the recorded environment: only hoard needs the config.
+    let hoard = match config::load(&ctx.repo.main) {
+        Ok(cfg) => cache::hoard(&ctx.repo.main, &cfg.cache),
+        Err(err) => {
+            eprintln!("warning: {err}; hoard values not exported");
+            None
+        }
+    };
+    report.text = Some(match hoard {
+        Some(h) => {
+            if matches!(args.format, Format::Dotenv | Format::Json) && !ctx.json {
+                eprintln!(
+                    "note: TURBO_TOKEN is not printed; read it from {}",
+                    h.token_file.display()
+                );
+            }
+            format_env_hoard(&entry.env, args.format, &h.api, &h.token_file)
+        }
+        None => format_env(&entry.env, args.format),
+    });
     report.worktrees = vec![entry.clone()];
     Ok(report)
 }

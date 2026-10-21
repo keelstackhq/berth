@@ -360,3 +360,22 @@ fn ls_unregistered_directory_is_drift() {
         "unregistered: not a worktree of this repo; run berth down a"
     );
 }
+
+#[test]
+fn env_survives_a_broken_berth_toml() {
+    let fx = Fixture::new();
+    fx.config(&fx.repo, "", "");
+    up(&fx, "a");
+    let before = stdout(&berth(&fx, &["env", "a"]));
+    let toml = fx.repo.join("berth.toml");
+    let old = fs::read_to_string(&toml).unwrap();
+    fs::write(&toml, format!("{old}\nbogus_key = 1\n")).unwrap();
+    let out = berth(&fx, &["env", "a"]);
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    assert_eq!(stdout(&out), before);
+    assert!(
+        stderr(&out).contains("warning: ") && stderr(&out).contains("; hoard values not exported"),
+        "{}",
+        stderr(&out)
+    );
+}
