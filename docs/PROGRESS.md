@@ -3,8 +3,8 @@
 ## Status
 
 Milestone 1 merged to `main` (PR #1, 2026-10-18; decisions channel in PR #2, 2026-10-21). Milestone 2
-(services) complete pending whole-branch review, plan `docs/superpowers/plans/2026-10-21-berth-m2.md`:
-Tasks 1-11 done.
+(services) complete, plan `docs/superpowers/plans/2026-10-21-berth-m2.md`: Tasks 1-11 and the
+whole-branch review fixes done; PR #3.
 
 ## Done
 
