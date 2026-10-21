@@ -227,13 +227,19 @@ never exported: they stay in `.env`, read by the app's own loader.
    checked (`git check-ref-format --branch`, exit 2) and the base resolved (exit 3) here, before
    any lock, port or file. A manifest tracked by git (`git ls-files --error-unmatch
    .agents/worktrees.json`) is exit 3: "run git rm --cached .agents/worktrees.json".
+   With `[db]`: the provider's tools are on `PATH` (`createdb` and `dropdb`, or `docker`; else
+   exit 3), the database name resolves (validation with a stand-in port block) and, for sqlite,
+   the template is a regular file without a pending `-wal` (else exit 3). All before any lock,
+   port or file.
 2. Take the repo lock `<git-common-dir>/berth.lock`. The user lock `<state>/ports.lock` is taken
    in step 4 only. Lock order is always repo → user, so two repos and two tasks cannot deadlock.
 3. Check: task not present (else §3 idempotency; a `creating` entry whose owner is alive → exit 1
    "task is being created by pid N"), path free, `max` not reached, every `[copy]` match is
    ignored by git (`git check-ignore`) — a copy-listed file git would track is refused (exit 1:
-   "add it to .gitignore"), because the agent would commit the secret. Nothing is created on
-   any of these paths.
+   "add it to .gitignore"), because the agent would commit the secret. A sqlite target path git
+   does not ignore is refused the same way. For an existing entry, `(provider, name)` from `[db]`
+   must equal the recorded database (else `drift`: run `berth down <task>`); healthy is item
+   `db <name> ok`. Nothing is created on any of these paths.
 4. Under the user lock: allocate ports (§9) and write `ports.json`; release the user lock.
 5. Still under the repo lock, in this order: add `/.berth/`, `/.agents/.*.tmp.*` and (unless git
    already ignores it) `/.agents/worktrees.json` to `<git-common-dir>/info/exclude`; write the
@@ -242,6 +248,12 @@ never exported: they stay in `.env`, read by the app's own loader.
    merge-base(branch, resolved base)`, and a given `--base` is reported `skipped` with a warning
    on stderr. A failure in this step frees the ports and drops the entry. Release the repo lock.
 6. Copy files (§10). Create `<wt>/.berth/tmp` (`/.berth/` is added to `.git/info/exclude`).
+6b. With `[db]`, unlocked, after the copy: create the database (§4): sqlite copies the template,
+   postgres runs `createdb`, compose runs `compose up --detach --wait`. A refused item (sqlite)
+   behaves like a copy refusal (rollback, exit 1). For postgres and compose, a short repo lock
+   then sets `db.created = true` in the manifest; the process may die between `createdb` and that
+   write, so `created` is false after such a crash and `down` never drops the database (it may be
+   someone else's). The setup hook (step 7) sees `$DATABASE_URL` and the other §7 variables.
 7. Run `[setup].run` in the worktree with the §7 env, output → stderr, with the timeout
    (`--no-setup` skips it).
    Each hook runs in its own process group; a timeout or failure kills the whole group. Ctrl-C
@@ -252,9 +264,11 @@ never exported: they stay in `.env`, read by the app's own loader.
 8. Retake the repo lock, set `state: ready` (or `failed`), release. A lock timeout here exits 3
    and says to run `berth down <task>` (setup finished; the entry stays `creating`).
 
-On failure after step 5, berth rolls back (teardown, worktree remove, branch delete if berth made
-it and it has no commits, ports freed) and exits 3 with the failed step and the last 20 hook-output
-lines; `--keep-on-failure` keeps it as `failed` for `down` later. Steps 6-7 run unlocked.
+On failure after step 5, berth rolls back (teardown, database drop if this run created it
+(postgres: `createdb` succeeded; compose: `up` was attempted; `dropdb --force`, errors only warn),
+worktree remove, branch delete if berth made it and it has no commits, ports freed) and exits 3 with the failed step and the last 20 hook-output
+lines; `--keep-on-failure` keeps it as `failed` (database included, `created` as recorded) for `down`
+later. Steps 6-7 run unlocked.
 
 Atomic writes: temp file in the same directory, `fsync`, `rename`. Locks: `std::fs::File::lock`
 (advisory; confirm the stable MSRV at plan time), waiting up to 30 s, then exit 3 naming the lock
@@ -305,7 +319,7 @@ means the branch is an ancestor of `base`, or, with git >= 2.38, `git merge-tree
 <base> <branch>` succeeds and yields base's own tree, i.e. every change of the branch is already
 in `base` (squash and rebase merges). berth never fetches: it compares with the local `base`, so
 `git pull` first; with older git only the ancestor test applies. Then
-teardown hook, `git worktree remove` (`--force` passed through only with berth's `--force`),
+teardown hook, the database drop (below), `git worktree remove` (`--force` passed through only with berth's `--force`),
 `git worktree prune`, release ports, drop the manifest entry.
 `down` refuses (exit 1) while a live process is still creating the task, and `--delete-branch`
 resolves `[worktree].base` at that moment. An owner on another host cannot be verified and counts
@@ -318,6 +332,14 @@ may be a real running `up`). `down` only inspects, runs hooks in and removes a p
 right before `git branch -D`; if the branch gained commits it is kept (item `skipped`). If
 `git worktree remove` fails without `--force` (e.g. the hook left untracked files), `down` exits 3
 with a message that says to pass `--force`; the entry stays `removing`.
+The database is dropped from the recorded `db` entry (config edits after `up` change nothing),
+after teardown and before the worktree goes, with the worktree as cwd (the main checkout if it is
+gone): postgres runs `dropdb --if-exists` only when `created` is true (else item `skipped`),
+compose runs `compose down --volumes --remove-orphans` for the recorded project, sqlite needs
+nothing (the file lives in the worktree). A failed drop exits 3 and keeps the entry `removing`
+("fix it and run berth down <task> again, or pass --force"). `--force` adds `--force` to `dropdb`
+and, if the drop still fails, warns and continues (item `db <name> drift`, "not dropped (ignored
+by --force)").
 
 **ls**: one row per manifest entry plus unmanaged worktrees under `[worktree].root`
 (`drift: unmanaged`): task, state, branch, ahead/behind, dirty, ports listening, path. Exit 0

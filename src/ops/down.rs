@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use crate::cli::DownArgs;
 use crate::config;
+use crate::db;
 use crate::git;
 use crate::hooks::run_hooks;
 use crate::manifest::{Entry, Manifest, State};
@@ -116,6 +117,37 @@ pub fn down(ctx: &Ctx, args: &DownArgs) -> Result<Report, BerthError> {
                 Action::Drift,
                 "teardown failed (ignored by --force)",
             ));
+        }
+    }
+
+    // 6b. The database, before its worktree goes (sqlite lives in the worktree and needs nothing).
+    if let Some(record) = &entry.db {
+        let cwd = if registered && path.exists() {
+            &path
+        } else {
+            main
+        };
+        let timeout = cfg
+            .db
+            .as_ref()
+            .map_or(Duration::from_secs(300), |d| d.timeout());
+        match db::drop(main, cwd, record, args.force, &entry.env, timeout) {
+            Ok(item) => items.extend(item),
+            Err(err) if args.force => {
+                eprintln!("warning: {err}");
+                items.push(Item::new(
+                    "db",
+                    &record.name,
+                    Action::Drift,
+                    "not dropped (ignored by --force)",
+                ));
+            }
+            Err(err) => {
+                return Err(BerthError::Env(format!(
+                    "{err}; the entry stays `removing`: fix it and run berth down {task} again, \
+                     or pass --force"
+                )));
+            }
         }
     }
 
