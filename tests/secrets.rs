@@ -100,3 +100,91 @@ fn canary_never_printed() {
     let _: Value = serde_json::from_slice(&out.stdout).expect("one JSON object");
     assert!(!stdout.contains(ENV_CANARY) && !stdout.contains(VARS_CANARY));
 }
+
+const SQLITE_CANARY: &str = "BERTH_CANARY_sqlite_91ab";
+const HOARD_CANARY: &str = "BERTH_CANARY_hoard_7c1f";
+const DOTENV_CANARY: &str = "BERTH_CANARY_dotenv_44e0";
+
+#[test]
+fn m2_canaries_never_printed() {
+    let fx = Fixture::new();
+    fx.config(
+        &fx.repo,
+        "",
+        "[db]\nprovider = \"sqlite\"\ntemplate = \"db/dev.sqlite\"\n\
+         [cache]\nremote = \"hoard\"\nturbo_seed = \"link\"",
+    );
+    write(&fx.repo, ".env", &format!("TOKEN={DOTENV_CANARY}\n"));
+    write(&fx.repo, "db/dev.sqlite", SQLITE_CANARY);
+    write(&fx.repo, ".hoard/port", "41234");
+    write(&fx.repo, ".hoard/token", HOARD_CANARY);
+    write(&fx.repo, ".turbo/cache/h1.tar.zst", "cache entry");
+    let exclude = fx.repo.join(".git/info/exclude");
+    let old = fs::read_to_string(&exclude).unwrap_or_default();
+    fs::write(
+        &exclude,
+        format!("{old}/db/dev.sqlite\n/.hoard/\n/.turbo/\n"),
+    )
+    .unwrap();
+
+    let canaries = [SQLITE_CANARY, HOARD_CANARY, DOTENV_CANARY];
+    let mut seen = Vec::new();
+    let mut step = |args: &[&str]| {
+        let out = run(&fx, args, &mut seen);
+        assert!(
+            matches!(out.status.code(), Some(0 | 1)),
+            "{args:?} exited {:?}: {}",
+            out.status.code(),
+            seen.last().unwrap().1
+        );
+        out
+    };
+    step(&["up", "a", "--json"]);
+    step(&["up", "a"]);
+    step(&["-v", "up", "b"]);
+    // The secrets really were copied and seeded, so their absence from the output means something.
+    let a = fs::canonicalize(fx.root.path())
+        .unwrap()
+        .join("repo.berth/a");
+    assert_eq!(
+        fs::read_to_string(a.join("db/dev.sqlite")).unwrap(),
+        SQLITE_CANARY
+    );
+    assert!(
+        fs::read_to_string(a.join(".env"))
+            .unwrap()
+            .contains(DOTENV_CANARY)
+    );
+    assert!(a.join(".turbo/cache/h1.tar.zst").exists());
+    let mut sh_text = String::new();
+    for format in ["sh", "fish", "dotenv", "json"] {
+        let out = step(&["env", "a", "--format", format]);
+        if format == "sh" || format == "fish" {
+            sh_text.push_str(&String::from_utf8_lossy(&out.stdout));
+        }
+    }
+    // The shell formats read the token from its file; they name the path, never the value.
+    assert!(sh_text.contains(".hoard/token"), "{sh_text}");
+    assert!(sh_text.contains("TURBO_API"), "{sh_text}");
+    step(&["ls", "--json"]);
+    step(&["doctor", "--json"]);
+    step(&["gc", "--dry-run", "--json"]);
+    for file in [
+        fx.repo.join(".agents/worktrees.json"),
+        fx.state.join("ports.json"),
+    ] {
+        let text = fs::read_to_string(&file).unwrap_or_default();
+        assert!(!text.is_empty(), "{file:?} is empty");
+        for canary in canaries {
+            assert!(!text.contains(canary), "canary in {file:?}");
+        }
+    }
+    step(&["down", "a"]);
+    step(&["down", "b", "-v"]);
+
+    for (args, text) in &seen {
+        for canary in canaries {
+            assert!(!text.contains(canary), "{canary} in output of {args}");
+        }
+    }
+}
