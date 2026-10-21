@@ -3,7 +3,7 @@
 ## Status
 
 Milestone 1 merged to `main` (PR #1, 2026-10-18; decisions channel in PR #2, 2026-10-21). Milestone 2
-(services) in progress, plan `docs/superpowers/plans/2026-10-21-berth-m2.md`: Tasks 1 (`[db]`, `[cache]` config), 2 (database plan, manifest `db` field, env) 3 (squash-aware `git::is_merged`) 4 (sqlite, postgres, compose providers) and 5 (databases in `up` and `down`) done; Task 6 next.
+(services) in progress, plan `docs/superpowers/plans/2026-10-21-berth-m2.md`: Tasks 1 (`[db]`, `[cache]` config), 2 (database plan, manifest `db` field, env) 3 (squash-aware `git::is_merged`) 4 (sqlite, postgres, compose providers) 5 (databases in `up` and `down`) and 6 (turbo cache seeding) done; Task 7 next.
 
 ## Done
 
@@ -28,6 +28,7 @@ Milestone 1 merged to `main` (PR #1, 2026-10-18; decisions channel in PR #2, 202
 - 2026-10-21 · M2 Task 3 · `git::version`, squash-aware `git::is_merged` (ancestor, or git >= 2.38 `merge-tree --write-tree` yields base's tree), used by `down --delete-branch` pre-check and re-check; spec §11 · `cargo test --test git` 25/25, `cli_down` 14/14, fmt, clippy, `cargo test --locked` green
 - 2026-10-21 · M2 Task 4 · database providers: `check_tools`, `check_sqlite`, `create`, `drop` (createdb/dropdb/docker compose via `run_hooks`, sqlite byte copy via `.berth/tmp`); `Fixture::fake_bin`/`isolated_path`; copy helpers `pub(crate)` · `cargo test --test db` 31/31 incl. real PostgreSQL 16 create+drop (`BERTH_TEST_PG_BIN`), fmt, clippy, `cargo test --locked` green
 - 2026-10-21 · M2 Task 5 · databases in `up` (step 1 checks before any lock, step 3 drift, step 6b create + `created` flag, rollback drops) and `down` (drop after teardown, `--force` warns); spec §8, §11 · `cargo test --test cli_db` 17/17 x4 runs, `cli_up`/`cli_down` snapshots unchanged, fmt, clippy, `cargo test --locked` green
+- 2026-10-21 · M2 Task 6 · turbo cache seeding (`src/cache.rs` `seed_turbo`, `[cache] turbo_seed` link|copy, `up` step 6a; never fails `up`); spec §8, §12 · `cargo test --test cli_cache` 8/8 (shared inodes, main untouched after a turbo-style rename), fmt, clippy, `cargo test --locked` green
 
 ## Blocked
 

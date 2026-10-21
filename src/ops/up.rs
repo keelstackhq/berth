@@ -5,8 +5,9 @@ use std::collections::BTreeMap;
 use std::path::{Component, Path, PathBuf};
 use std::time::{Duration, Instant};
 
+use crate::cache;
 use crate::cli::UpArgs;
-use crate::config::{self, Config, Provider};
+use crate::config::{self, Config, Provider, Seed};
 use crate::copy;
 use crate::db::{self, DbPlan};
 use crate::env::{EnvInput, build_env, sh_quote};
@@ -231,7 +232,13 @@ pub fn up(ctx: &Ctx, args: &UpArgs) -> Result<Report, BerthError> {
     }
     sys::test_pause("after_copy");
 
-    // 6b. Database (unlocked), after copy (Task 6 seeds the turbo cache just before it).
+    // 6a. Turbo cache seed (unlocked); never fails `up`.
+    let mut cache_items = Vec::new();
+    if cfg.cache.turbo_seed != Seed::Off {
+        cache_items.push(cache::seed_turbo(main, &path, cfg.cache.turbo_seed));
+    }
+
+    // 6b. Database (unlocked), after the seed.
     let mut db_items = Vec::new();
     if let (Some(dbcfg), Some(plan)) = (&cfg.db, &db_plan) {
         // compose: `up` may start containers before it fails, so an attempt is enough to undo.
@@ -317,6 +324,7 @@ pub fn up(ctx: &Ctx, args: &UpArgs) -> Result<Report, BerthError> {
     all.push(items.remove(0));
     all.push(ports_item(&entry.ports, Action::Create));
     all.extend(copy_items);
+    all.append(&mut cache_items);
     all.append(&mut db_items);
     all.extend(plan.skipped);
     all.append(&mut items);

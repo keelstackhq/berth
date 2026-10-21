@@ -248,7 +248,10 @@ never exported: they stay in `.env`, read by the app's own loader.
    merge-base(branch, resolved base)`, and a given `--base` is reported `skipped` with a warning
    on stderr. A failure in this step frees the ports and drops the entry. Release the repo lock.
 6. Copy files (§10). Create `<wt>/.berth/tmp` (`/.berth/` is added to `.git/info/exclude`).
-6b. With `[db]`, unlocked, after the copy: create the database (§4): sqlite copies the template,
+6a. With `[cache] turbo_seed = "link"|"copy"` (default `off`: nothing happens, no item), unlocked,
+   after the copy: seed `<wt>/.turbo/cache` from `<main>/.turbo/cache` (§12). Never fails `up`:
+   a problem is item `cache turbo skipped` plus a `warning:` on stderr.
+6b. With `[db]`, unlocked, after the seed: create the database (§4): sqlite copies the template,
    postgres runs `createdb`, compose runs `compose up --detach --wait`. A refused item (sqlite)
    behaves like a copy refusal (rollback, exit 1). For postgres and compose, a short repo lock
    then sets `db.created = true` in the manifest; the process may die between `createdb` and that
@@ -362,8 +365,14 @@ its worktree directory is gone.
   keys are immutable with if-not-exists writes, so many worktrees can share one remote safely. M2:
   `[cache] remote = "hoard"` makes `berth env` export `TURBO_API`/`TURBO_TOKEN`/`TURBO_TEAM` for a
   `hoard serve --storage fs` the user (or a hull hook) runs; berth does not start or supervise it
-  (no daemon). M2 also evaluates hard-linking the main checkout's `.turbo/cache` entries into a new
-  worktree (valid only if turbo never rewrites entries in place; verify).
+  (no daemon). `[cache] turbo_seed = "link"|"copy"` (default `off`) seeds a new worktree's
+  `.turbo/cache` from the main checkout's: top-level regular files only (no symlinks,
+  subdirectories or `*.tmp`), existing targets kept; `link` hard-links and copies any file it cannot
+  link, `copy` always copies (temp + rename). Skipped (item `skipped`) when `.turbo/` is not
+  gitignored (the worktree would be dirty and `down` would refuse) or the source is missing.
+  Hard links are safe because turbo writes archive, `-meta.json` and `-manifest.json` to a temp
+  file and renames it, and eviction unlinks; no entry is rewritten in place (turbo `v2.11.8` and
+  `main`, `crates/turborepo-cache/src/fs.rs`; older versions unchecked, use `copy`).
 - **hull** (a later step, separate plan in hull): base renders `berth.toml` (seed), the
   `.agents/worktrees.json` ignore line, a `berth` skill (when to call `up`/`env`/`down`, read the
   JSON, never read copied files), a SessionStart hook snippet that exports `berth env` when the
