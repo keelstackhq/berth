@@ -380,6 +380,14 @@ reserved ports re-probed; `creating` entries with dead owners. Exit 1 on any dri
 Lock-free and file-free like `ls`. Manifest, exclude, port and owner checks run only when
 `.agents/worktrees.json` exists. A listening port is drift only when its task is not `ready` or
 its worktree directory is gone.
+With `[db]`: `db tools` is `drift` when `createdb`/`dropdb` (postgres) or `docker` (compose) is
+not on `PATH` (with the install hint); sqlite gets one `db sqlite` item that is `drift` for a
+missing or non-regular template, a non-empty `-wal`, or a target git does not ignore (never exit 3);
+a `ready` postgres entry with `created: false` is `drift` ("database <n> was not recorded as
+created; berth down will leave it"). With `turbo_seed` on and `.turbo/` not ignored: `cache turbo`
+`drift`. With `remote = "hoard"`: `cache hoard ok` with the server URL, or `skipped` "no running
+hoard server" (not drift, no warning, the token is never shown). `doctor` still takes no lock,
+writes no file and never connects to a database or runs `createdb`, `dropdb` or `docker`.
 
 ## 12. Integration with hoard, hull, logbook, hoist
 

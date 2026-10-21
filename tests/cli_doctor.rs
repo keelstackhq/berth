@@ -306,3 +306,227 @@ fn creating_entry_on_another_host_is_drift() {
         "{v}"
     );
 }
+
+fn ignore(fx: &Fixture, line: &str) {
+    let path = fx.repo.join(".git/info/exclude");
+    let old = fs::read_to_string(&path).unwrap_or_default();
+    fs::write(path, format!("{old}{line}\n")).unwrap();
+}
+
+fn find<'a>(v: &'a Value, kind: &str, key: &str) -> &'a Value {
+    items(v, kind)
+        .into_iter()
+        .find(|i| i["key"] == key)
+        .unwrap_or_else(|| panic!("no {kind} {key} item: {v}"))
+}
+
+fn fake_db_tools(fx: &Fixture) -> PathBuf {
+    let log = fx.root.path().join("tools.log");
+    for tool in ["createdb", "dropdb", "docker"] {
+        fx.fake_bin(tool, &format!("echo {tool} >> '{}'", log.display()));
+    }
+    log
+}
+
+fn pg(fx: &Fixture) {
+    fx.config(&fx.repo, "", "[db]\nprovider = \"postgres\"");
+}
+
+#[test]
+fn no_db_or_cache_config_adds_no_items() {
+    let fx = Fixture::new();
+    fx.config(&fx.repo, "", "");
+    let (code, v) = doctor(&fx);
+    assert_eq!(code, 0, "{v}");
+    assert!(items(&v, "db").is_empty());
+    assert!(items(&v, "cache").is_empty());
+}
+
+#[test]
+fn db_tools_present_are_ok_and_never_run() {
+    let fx = Fixture::new();
+    let log = fake_db_tools(&fx);
+    pg(&fx);
+    let (code, v) = doctor(&fx);
+    assert_eq!(code, 0, "{v}");
+    assert_eq!(find(&v, "db", "tools")["action"], "ok");
+    assert!(!log.exists(), "doctor ran a database tool");
+}
+
+#[test]
+fn missing_db_tools_are_drift_with_the_hint() {
+    let fx = Fixture::new();
+    pg(&fx);
+    let out = fx
+        .berth()
+        .env("PATH", fx.isolated_path())
+        .args(["doctor", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let tools = find(&v, "db", "tools");
+    assert_eq!(tools["action"], "drift");
+    let reason = tools["reason"].as_str().unwrap();
+    assert!(reason.contains("createdb not found on PATH"), "{reason}");
+    assert!(
+        reason.contains("install the PostgreSQL client tools"),
+        "{reason}"
+    );
+}
+
+#[test]
+fn compose_without_docker_is_drift() {
+    let fx = Fixture::new();
+    fx.config(&fx.repo, "", "[db]\nprovider = \"compose\"");
+    let out = fx
+        .berth()
+        .env("PATH", fx.isolated_path())
+        .args(["doctor", "--json"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(1), "{}", stderr(&out));
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(find(&v, "db", "tools")["action"], "drift");
+    assert!(
+        find(&v, "db", "tools")["reason"]
+            .as_str()
+            .unwrap()
+            .contains("docker not found")
+    );
+}
+
+fn sqlite(fx: &Fixture) {
+    write(&fx.repo, "db/dev.sqlite", "SQLITE-TEMPLATE");
+    ignore(fx, "/db/dev.sqlite");
+    fx.config(
+        &fx.repo,
+        "",
+        "[db]\nprovider = \"sqlite\"\ntemplate = \"db/dev.sqlite\"",
+    );
+}
+
+#[test]
+fn sqlite_healthy_is_ok() {
+    let fx = Fixture::new();
+    sqlite(&fx);
+    let (code, v) = doctor(&fx);
+    assert_eq!(code, 0, "{v}");
+    assert_eq!(find(&v, "db", "sqlite")["action"], "ok");
+    assert!(items(&v, "db").iter().all(|i| i["key"] != "tools"));
+}
+
+#[test]
+fn sqlite_problems_are_drift_not_errors() {
+    // Missing template.
+    let fx = Fixture::new();
+    sqlite(&fx);
+    fs::remove_file(fx.repo.join("db/dev.sqlite")).unwrap();
+    let (code, v) = doctor(&fx);
+    assert_eq!(code, 1, "{v}");
+    assert_eq!(find(&v, "db", "sqlite")["action"], "drift");
+    assert!(
+        find(&v, "db", "sqlite")["reason"]
+            .as_str()
+            .unwrap()
+            .contains("does not exist")
+    );
+    // Non-empty -wal.
+    let fx = Fixture::new();
+    sqlite(&fx);
+    write(&fx.repo, "db/dev.sqlite-wal", "pending");
+    let (code, v) = doctor(&fx);
+    assert_eq!(code, 1, "{v}");
+    assert!(
+        find(&v, "db", "sqlite")["reason"]
+            .as_str()
+            .unwrap()
+            .contains("-wal")
+    );
+    // Target not ignored.
+    let fx = Fixture::new();
+    write(&fx.repo, "db/dev.sqlite", "SQLITE-TEMPLATE");
+    fx.config(
+        &fx.repo,
+        "",
+        "[db]\nprovider = \"sqlite\"\ntemplate = \"db/dev.sqlite\"",
+    );
+    let (code, v) = doctor(&fx);
+    assert_eq!(code, 1, "{v}");
+    let item = find(&v, "db", "sqlite");
+    assert_eq!(item["action"], "drift");
+    assert!(item["reason"].as_str().unwrap().contains(".gitignore"));
+}
+
+fn set_created(fx: &Fixture, created: bool) {
+    let path = fx.repo.join(".agents/worktrees.json");
+    let mut v: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    v["worktrees"][0]["db"]["created"] = created.into();
+    fs::write(&path, serde_json::to_vec_pretty(&v).unwrap()).unwrap();
+}
+
+#[test]
+fn postgres_entry_not_recorded_as_created_is_drift() {
+    let fx = Fixture::new();
+    let log = fake_db_tools(&fx);
+    pg(&fx);
+    up(&fx, "a");
+    let before = fs::read_to_string(&log).unwrap();
+    let (code, v) = doctor(&fx);
+    assert_eq!(code, 0, "{v}");
+    assert!(items(&v, "db").iter().all(|i| i["action"] == "ok"), "{v}");
+    set_created(&fx, false);
+    let (code, v) = doctor(&fx);
+    assert_eq!(code, 1, "{v}");
+    let item = find(&v, "db", "repo_a");
+    assert_eq!(item["action"], "drift");
+    assert_eq!(
+        item["reason"],
+        "database repo_a was not recorded as created; berth down will leave it"
+    );
+    assert_eq!(
+        fs::read_to_string(&log).unwrap(),
+        before,
+        "doctor ran a tool"
+    );
+}
+
+#[test]
+fn turbo_seed_without_ignore_is_drift() {
+    let fx = Fixture::new();
+    fx.config(&fx.repo, "", "[cache]\nturbo_seed = \"link\"");
+    let (code, v) = doctor(&fx);
+    assert_eq!(code, 1, "{v}");
+    let item = find(&v, "cache", "turbo");
+    assert_eq!(item["action"], "drift");
+    assert!(item["reason"].as_str().unwrap().contains(".turbo/"));
+    ignore(&fx, ".turbo/");
+    let (code, v) = doctor(&fx);
+    assert_eq!(code, 0, "{v}");
+    assert_eq!(find(&v, "cache", "turbo")["action"], "ok");
+}
+
+#[test]
+fn hoard_server_found_is_ok_and_absent_is_skipped_without_warning() {
+    let fx = Fixture::new();
+    fx.config(&fx.repo, "", "[cache]\nremote = \"hoard\"");
+    ignore(&fx, ".hoard/");
+    let out = berth(&fx, &["doctor", "--json"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert!(!stderr(&out).contains("warning"), "{}", stderr(&out));
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let item = find(&v, "cache", "hoard");
+    assert_eq!(item["action"], "skipped");
+    assert_eq!(item["reason"], "no running hoard server");
+
+    write(&fx.repo, ".hoard/port", "41234");
+    write(&fx.repo, ".hoard/token", "BERTH_CANARY_hoard_7c1f");
+    let out = berth(&fx, &["doctor", "--json"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let text = String::from_utf8_lossy(&out.stdout).into_owned() + &stderr(&out);
+    assert!(!text.contains("BERTH_CANARY"), "token leaked");
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let item = find(&v, "cache", "hoard");
+    assert_eq!(item["action"], "ok");
+    assert_eq!(item["reason"], "http://127.0.0.1:41234");
+}

@@ -5,7 +5,10 @@
 use std::collections::BTreeSet;
 use std::path::{Path, PathBuf};
 
+use crate::cache;
+use crate::config::{Config, Provider, Remote, Seed};
 use crate::copy::plan_copy;
+use crate::db;
 use crate::manifest::{Manifest, State, manifest_path};
 use crate::ops::up::worktree_path;
 use crate::ports::{BindProber, Prober};
@@ -68,6 +71,8 @@ pub fn doctor(ctx: &Ctx) -> Result<Report, BerthError> {
         .unwrap_or_default();
     items.push(root_item(main, &root)?);
 
+    items.extend(service_items(main, &cfg)?);
+
     let state = registry::state_dir()?;
     let stale: Vec<Item> = Registry::load(&state)?
         .blocks
@@ -98,6 +103,7 @@ pub fn doctor(ctx: &Ctx) -> Result<Report, BerthError> {
         items.extend(exclude_items(main)?);
         items.extend(port_items(&manifest));
         items.extend(owner_items(&manifest));
+        items.extend(db_entry_items(&manifest));
         report.worktrees = manifest.worktrees;
     }
     if report.items.iter().any(|i| i.action == Action::Drift) {
@@ -303,4 +309,69 @@ fn owner_items(manifest: &Manifest) -> Vec<Item> {
         )];
     }
     bad
+}
+
+/// `[db]` and `[cache]` checks. Reads config and PATH only: no database connection, no
+/// `createdb`/`docker`, no file written. Problems are `drift`, never an error exit.
+fn service_items(main: &Path, cfg: &Config) -> Result<Vec<Item>, BerthError> {
+    let mut out = Vec::new();
+    if let Some(db_cfg) = &cfg.db {
+        if db_cfg.provider != Provider::Sqlite {
+            out.push(match db::check_tools(db_cfg) {
+                Ok(()) => Item::new("db", "tools", Action::Ok, "found on PATH"),
+                Err(BerthError::Env(why)) => Item::new("db", "tools", Action::Drift, why),
+                Err(other) => return Err(other),
+            });
+        } else {
+            out.push(match db::check_sqlite(main, db_cfg) {
+                Ok(None) => Item::new("db", "sqlite", Action::Ok, "template and target are fine"),
+                Ok(Some(refused)) => Item::new("db", "sqlite", Action::Drift, refused.reason),
+                Err(BerthError::Env(why)) => Item::new("db", "sqlite", Action::Drift, why),
+                Err(other) => return Err(other),
+            });
+        }
+    }
+    if cfg.cache.turbo_seed != Seed::Off {
+        let ignored = !git::ignored(main, &[".turbo/cache/x".to_string()])?.is_empty();
+        out.push(if ignored {
+            Item::new("cache", "turbo", Action::Ok, ".turbo/ is ignored by git")
+        } else {
+            Item::new(
+                "cache",
+                "turbo",
+                Action::Drift,
+                ".turbo/ is not gitignored, so a seeded cache would make worktrees dirty and \
+                 `berth up` skips seeding; add .turbo/ to .gitignore",
+            )
+        });
+    }
+    if cfg.cache.remote == Remote::Hoard {
+        out.push(match cache::hoard_quiet(main, &cfg.cache) {
+            Some(h) => Item::new("cache", "hoard", Action::Ok, h.api),
+            None => Item::new("cache", "hoard", Action::Skipped, "no running hoard server"),
+        });
+    }
+    Ok(out)
+}
+
+/// A ready postgres entry whose database berth did not create: `down` will leave it.
+fn db_entry_items(manifest: &Manifest) -> Vec<Item> {
+    manifest
+        .worktrees
+        .iter()
+        .filter(|e| e.state == State::Ready)
+        .filter_map(|e| e.db.as_ref().map(|d| (e, d)))
+        .filter(|(_, d)| d.provider == "postgres" && !d.created)
+        .map(|(_, d)| {
+            Item::new(
+                "db",
+                &d.name,
+                Action::Drift,
+                format!(
+                    "database {} was not recorded as created; berth down will leave it",
+                    d.name
+                ),
+            )
+        })
+        .collect()
 }

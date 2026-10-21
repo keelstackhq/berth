@@ -3,7 +3,7 @@
 ## Status
 
 Milestone 1 merged to `main` (PR #1, 2026-10-18; decisions channel in PR #2, 2026-10-21). Milestone 2
-(services) in progress, plan `docs/superpowers/plans/2026-10-21-berth-m2.md`: Tasks 1 (`[db]`, `[cache]` config), 2 (database plan, manifest `db` field, env) 3 (squash-aware `git::is_merged`) 4 (sqlite, postgres, compose providers) 5 (databases in `up` and `down`) 6 (turbo cache seeding) 7 (hoard remote-cache export) and 8 (`berth gc`) done; Task 9 next.
+(services) in progress, plan `docs/superpowers/plans/2026-10-21-berth-m2.md`: Tasks 1 (`[db]`, `[cache]` config), 2 (database plan, manifest `db` field, env) 3 (squash-aware `git::is_merged`) 4 (sqlite, postgres, compose providers) 5 (databases in `up` and `down`) 6 (turbo cache seeding) 7 (hoard remote-cache export) 8 (`berth gc`) and 9 (doctor checks) done; Task 10 next.
 
 ## Done
 
@@ -31,6 +31,7 @@ Milestone 1 merged to `main` (PR #1, 2026-10-18; decisions channel in PR #2, 202
 - 2026-10-21 · M2 Task 6 · turbo cache seeding (`src/cache.rs` `seed_turbo`, `[cache] turbo_seed` link|copy, `up` step 6a; never fails `up`); spec §8, §12 · `cargo test --test cli_cache` 8/8 (shared inodes, main untouched after a turbo-style rename), fmt, clippy, `cargo test --locked` green
 - 2026-10-21 · M2 Task 7 · hoard remote-cache export (`cache::hoard`/`hook_env`; hooks get `TURBO_*`, `berth env` prints `TURBO_API`/`TURBO_TEAM` plus a token-file substitution, never the token); spec §7, §12 · `cargo test --test cli_cache` 18/18 (sh output evaluated in `sh`, canary absent from stdout/stderr/JSON/manifest/`-v`), fmt, clippy, `cargo test --locked` green
 - 2026-10-21 · M2 Task 8 · `berth gc [--dry-run] [--delete-branch]` (lock-free scan, each removal through `down_task`, which `down` now wraps unchanged); spec §3, §11 · `cargo test --test cli_gc` 8/8 (merged, squash-merged, open, fresh, dirty, failed kept; failing teardown exit 3), `cli_down` snapshots unchanged, fmt, clippy, `cargo test --locked` green
+- 2026-10-21 · M2 Task 9 · `doctor` checks `[db]` tools, sqlite template/wal/target, unrecorded postgres databases, turbo seed ignore, hoard server (`cache::hoard_quiet`); lock-free, never runs a db tool; spec §11 · `cargo test --test cli_doctor` 22/22, fmt, clippy, `cargo test --locked` green
 
 ## Blocked
 

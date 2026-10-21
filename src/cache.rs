@@ -115,6 +115,29 @@ pub fn hoard(main: &Path, cache: &CacheCfg) -> Option<Hoard> {
     if cache.remote != Remote::Hoard {
         return None;
     }
+    match locate(main, cache) {
+        Ok(h) => Some(h),
+        Err((file, why)) => {
+            eprintln!(
+                "warning: no running hoard server ({} {why}); start hoard serve --storage fs in {}",
+                file.display(),
+                main.display()
+            );
+            None
+        }
+    }
+}
+
+/// Like `hoard` without the warning (for `doctor`, which reports the absence as an item).
+pub fn hoard_quiet(main: &Path, cache: &CacheCfg) -> Option<Hoard> {
+    if cache.remote != Remote::Hoard {
+        return None;
+    }
+    locate(main, cache).ok()
+}
+
+/// The server's port and token files, or the file that is missing, invalid or empty.
+fn locate(main: &Path, cache: &CacheCfg) -> Result<Hoard, (PathBuf, &'static str)> {
     let dir = main.join(&cache.hoard_dir);
     let port_file = dir.join("port");
     let token_file = dir.join("token");
@@ -128,24 +151,13 @@ pub fn hoard(main: &Path, cache: &CacheCfg) -> Option<Hoard> {
         Err(_) => Err("missing"),
     };
     match (port, token) {
-        (Ok(port), Ok(token)) => Some(Hoard {
+        (Ok(port), Ok(token)) => Ok(Hoard {
             api: format!("http://127.0.0.1:{port}"),
             token_file,
             token,
         }),
-        (port, token) => {
-            let (file, why) = match (port, token) {
-                (Err(why), _) => (port_file, why),
-                (_, Err(why)) => (token_file, why),
-                _ => unreachable!(),
-            };
-            eprintln!(
-                "warning: no running hoard server ({} {why}); start hoard serve --storage fs in {}",
-                file.display(),
-                main.display()
-            );
-            None
-        }
+        (Err(why), _) => Err((port_file, why)),
+        (_, Err(why)) => Err((token_file, why)),
     }
 }
 
