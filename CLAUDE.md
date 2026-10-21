@@ -71,3 +71,12 @@ Run the fast checks before every commit.
 - `info/exclude` lives in the common git dir and applies to every worktree.
 - flock conflicts across file descriptors even inside one process.
 - The package is `keel-berth`; the binary and the lib are `berth`.
+
+<!-- splice:decisions:begin — managed by `splice update --channel decisions`; edit the source -->
+## Org decisions
+
+Cross-repo decisions from keelstackhq/decisions; follow them. To change one, open a PR there.
+`splice update --channel decisions` refreshes this snapshot; commit it alone as `chore: sync org decisions`.
+
+@docs/agents/org-decisions.md
+<!-- splice:decisions:end -->
