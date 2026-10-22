@@ -1,4 +1,6 @@
-//! Advisory file locks (flock) with a holder record. Lock order is always repo, then user.
+//! Advisory file locks (flock / LockFileEx) with a holder record. Lock order is always repo, then
+//! user. The holder record lives in a sidecar `<lock>.holder` on every OS: a Windows lock is
+//! mandatory, so another handle could not read it from the locked file itself.
 
 use std::fs::{File, OpenOptions, TryLockError};
 use std::io::{ErrorKind, Write};
@@ -14,11 +16,12 @@ const DEFAULT_TIMEOUT_MS: u64 = 30_000;
 /// A held lock. Dropping it empties the holder record, then releases the lock.
 pub struct LockGuard {
     file: File,
+    holder: PathBuf,
 }
 
 impl Drop for LockGuard {
     fn drop(&mut self) {
-        let _ = self.file.set_len(0);
+        let _ = std::fs::write(&self.holder, b"");
         let _ = self.file.unlock();
     }
 }
@@ -30,13 +33,20 @@ fn io_err(path: &Path, source: std::io::Error) -> BerthError {
     }
 }
 
+/// The sidecar holding the holder record of the lock at `path`: `<path>.holder`.
+pub fn holder_path(path: &Path) -> PathBuf {
+    let mut name = path.as_os_str().to_os_string();
+    name.push(".holder");
+    PathBuf::from(name)
+}
+
 /// Take the exclusive lock at `path`, polling every 50 ms until `timeout`.
-/// On timeout the error names the holder recorded in the file.
+/// On timeout the error names the holder recorded in the sidecar.
 pub fn acquire(path: &Path, timeout: Duration) -> Result<LockGuard, BerthError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|e| io_err(parent, e))?;
     }
-    let mut file = OpenOptions::new()
+    let file = OpenOptions::new()
         .read(true)
         .write(true)
         .create(true)
@@ -66,15 +76,20 @@ pub fn acquire(path: &Path, timeout: Duration) -> Result<LockGuard, BerthError> 
         sys::hostname(),
         argv.join(" ")
     );
-    file.set_len(0).map_err(|e| io_err(path, e))?;
-    file.write_all(record.as_bytes())
-        .and_then(|()| file.sync_all())
-        .map_err(|e| io_err(path, e))?;
-    Ok(LockGuard { file })
+    let holder = holder_path(path);
+    let written = File::create(&holder).and_then(|mut f| {
+        f.write_all(record.as_bytes())?;
+        f.sync_all()
+    });
+    if let Err(e) = written {
+        let _ = file.unlock();
+        return Err(io_err(&holder, e));
+    }
+    Ok(LockGuard { file, holder })
 }
 
 fn holder_of(path: &Path) -> String {
-    match std::fs::read(path) {
+    match std::fs::read(holder_path(path)) {
         Ok(bytes) if !bytes.is_empty() => String::from_utf8_lossy(&bytes).trim().to_string(),
         _ => "unknown (holder not yet recorded)".to_string(),
     }

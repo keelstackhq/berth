@@ -2,7 +2,7 @@ use std::path::Path;
 use std::time::{Duration, Instant};
 
 use berth::BerthError;
-use berth::lock::{acquire, is_held, repo_lock, user_lock};
+use berth::lock::{acquire, holder_path, is_held, repo_lock, user_lock};
 
 #[test]
 fn second_acquire_times_out_naming_holder() {
@@ -34,9 +34,18 @@ fn released_on_drop() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("berth.lock");
     let a = acquire(&path, Duration::from_millis(200)).unwrap();
-    assert!(!std::fs::read(&path).unwrap().is_empty());
-    drop(a);
+    // The holder record lives in a sidecar: Windows locks are mandatory, so the lock file
+    // itself cannot be read by another handle.
+    let sidecar = holder_path(&path);
+    assert_eq!(sidecar, dir.path().join("berth.lock.holder"));
+    let record = std::fs::read_to_string(&sidecar).unwrap();
+    assert!(
+        record.contains(&format!("pid={}", std::process::id())),
+        "{record}"
+    );
     assert!(std::fs::read(&path).unwrap().is_empty());
+    drop(a);
+    assert!(std::fs::read(&sidecar).unwrap().is_empty());
     // A zero timeout tries once: success proves the lock was free right away,
     // without a wall-clock assertion that flakes under load.
     let _b = acquire(&path, Duration::ZERO).expect("lock free immediately after drop");
@@ -50,13 +59,13 @@ fn is_held_is_read_only() {
     assert!(!path.exists(), "is_held must not create the file");
 
     let a = acquire(&path, Duration::from_millis(200)).unwrap();
-    let before = std::fs::read(&path).unwrap();
+    let before = std::fs::read(holder_path(&path)).unwrap();
     assert!(is_held(&path));
-    assert_eq!(std::fs::read(&path).unwrap(), before);
+    assert_eq!(std::fs::read(holder_path(&path)).unwrap(), before);
 
     drop(a);
     assert!(!is_held(&path));
-    assert!(std::fs::read(&path).unwrap().is_empty());
+    assert!(std::fs::read(holder_path(&path)).unwrap().is_empty());
 }
 
 #[test]

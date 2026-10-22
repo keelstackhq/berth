@@ -1,5 +1,10 @@
-//! Small OS helpers: time, hostname, process liveness and group kill, test pause points.
+//! Small OS helpers: time, hostname, process liveness and tree kill, POSIX `sh` lookup, test
+//! pause points. Unix and Windows differ only in here and in `hooks.rs`.
 
+use crate::error::BerthError;
+#[cfg(windows)]
+use std::path::Path;
+use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -34,11 +39,24 @@ pub fn rfc3339(secs: u64) -> String {
     )
 }
 
-/// `uname -n`, trimmed; `"unknown"` when it cannot be read.
+/// The machine name; `"unknown"` when it cannot be read. Unix: `uname -n`. Windows:
+/// `COMPUTERNAME`, else `hostname`.
 pub fn hostname() -> String {
-    Command::new("uname")
-        .arg("-n")
-        .stdin(Stdio::null())
+    #[cfg(windows)]
+    if let Some(name) = std::env::var("COMPUTERNAME")
+        .ok()
+        .map(|n| n.trim().to_string())
+        .filter(|n| !n.is_empty())
+    {
+        return name;
+    }
+    #[cfg(unix)]
+    let mut cmd = Command::new("uname");
+    #[cfg(unix)]
+    cmd.arg("-n");
+    #[cfg(windows)]
+    let mut cmd = Command::new("hostname");
+    cmd.stdin(Stdio::null())
         .stderr(Stdio::null())
         .output()
         .ok()
@@ -53,26 +71,138 @@ pub fn pid_alive(pid: u32, host: &str) -> bool {
     if host != hostname() {
         return true;
     }
-    match Command::new("sh")
-        .args(["-c", r#"kill -0 "$1" 2>/dev/null"#, "sh", &pid.to_string()])
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
+    #[cfg(unix)]
     {
-        Ok(status) => status.success(),
-        Err(_) => true,
+        match Command::new("sh")
+            .args(["-c", r#"kill -0 "$1" 2>/dev/null"#, "sh", &pid.to_string()])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+        {
+            Ok(status) => status.success(),
+            Err(_) => true,
+        }
+    }
+    #[cfg(windows)]
+    {
+        match Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/FO", "CSV", "/NH"])
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+        {
+            Ok(out) if out.status.success() => {
+                tasklist_lists_pid(&String::from_utf8_lossy(&out.stdout), pid)
+            }
+            _ => true,
+        }
     }
 }
 
-/// SIGKILL a whole process group. Errors are ignored (the group may already be gone).
-pub fn kill_group(pgid: u32) {
-    let _ = Command::new("sh")
-        .args(["-c", r#"kill -s KILL -- "-$1""#, "sh", &pgid.to_string()])
+/// Whether `tasklist /FO CSV /NH` output has a row whose PID field (the second) is `pid`.
+/// No match prints an `INFO:` line instead of a row.
+pub fn tasklist_lists_pid(stdout: &str, pid: u32) -> bool {
+    let want = pid.to_string();
+    stdout.lines().any(|line| {
+        line.trim()
+            .trim_matches('"')
+            .split("\",\"")
+            .nth(1)
+            .is_some_and(|field| field == want)
+    })
+}
+
+/// Kill the process `pid` and everything it started. Errors are ignored (it may already be
+/// gone). Unix: SIGKILL to the process group `pid` leads (hooks run in their own group).
+/// Windows: `taskkill /T /F /PID`.
+pub fn kill_tree(pid: u32) {
+    #[cfg(unix)]
+    let mut cmd = {
+        let mut cmd = Command::new("sh");
+        cmd.args(["-c", r#"kill -s KILL -- "-$1""#, "sh", &pid.to_string()]);
+        cmd
+    };
+    #[cfg(windows)]
+    let mut cmd = {
+        let mut cmd = Command::new("taskkill");
+        cmd.args(["/T", "/F", "/PID", &pid.to_string()]);
+        cmd
+    };
+    let _ = cmd
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status();
+}
+
+/// Where Git for Windows keeps its `sh.exe`, derived from `git --exec-path`. Walks up from the
+/// exec path (`<prefix>\mingw64\libexec\git-core`, also `mingw32` and `clangarm64`) to the first
+/// directory with `bin\sh.exe`, else `usr\bin\sh.exe`. Pure: `exists` answers whether a candidate
+/// file is there. Accepts `\` and `/`.
+pub fn sh_from_exec_path(exec_path: &str, exists: impl Fn(&str) -> bool) -> Option<String> {
+    let sep = if exec_path.contains('\\') { '\\' } else { '/' };
+    let trimmed = exec_path.trim();
+    let parts: Vec<&str> = trimmed
+        .split(['\\', '/'])
+        .filter(|p| !p.is_empty())
+        .collect();
+    // A leading separator (`/c/Git/...`, `\\server\...`) belongs to the first piece.
+    let lead = if trimmed.starts_with(['\\', '/']) {
+        sep.to_string()
+    } else {
+        String::new()
+    };
+    for n in (1..parts.len()).rev() {
+        let prefix = format!("{lead}{}", parts[..n].join(&sep.to_string()));
+        for tail in [format!("bin{sep}sh.exe"), format!("usr{sep}bin{sep}sh.exe")] {
+            let cand = format!("{prefix}{sep}{tail}");
+            if exists(&cand) {
+                return Some(cand);
+            }
+        }
+    }
+    None
+}
+
+/// The POSIX `sh` that runs hooks and shell helpers. Unix: `sh`. Windows: `sh.exe` first on
+/// `PATH`, else Git for Windows' own, found from `git --exec-path`; missing is exit 3.
+pub fn find_sh() -> Result<PathBuf, BerthError> {
+    #[cfg(unix)]
+    {
+        Ok(PathBuf::from("sh"))
+    }
+    #[cfg(windows)]
+    {
+        let on_path = std::env::var_os("PATH").and_then(|paths| {
+            std::env::split_paths(&paths)
+                .map(|d| d.join("sh.exe"))
+                .find(|c| c.is_file())
+        });
+        if let Some(p) = on_path {
+            return Ok(p);
+        }
+        Command::new("git")
+            .arg("--exec-path")
+            .stdin(Stdio::null())
+            .stderr(Stdio::null())
+            .output()
+            .ok()
+            .filter(|o| o.status.success())
+            .and_then(|o| {
+                sh_from_exec_path(String::from_utf8_lossy(&o.stdout).trim(), |p| {
+                    Path::new(p).is_file()
+                })
+            })
+            .map(PathBuf::from)
+            .ok_or_else(|| {
+                BerthError::Env(
+                    "berth needs a POSIX sh on Windows and found none on PATH or next to git; \
+                     install Git for Windows or put sh.exe on PATH"
+                        .into(),
+                )
+            })
+    }
 }
 
 /// Test hook: when `BERTH_TEST_PAUSE` equals `step`, write `<state_dir>/paused-<step>` and sleep

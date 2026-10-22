@@ -1,9 +1,10 @@
-//! Setup and teardown hooks: shell commands run in their own process group, with a timeout
+//! Setup and teardown hooks: shell commands run in their own process group (Unix) or tree (Windows), with a timeout
 //! over the whole list. Output goes to berth's stderr only; the last 20 lines are kept for errors.
 
 use crate::{BerthError, sys, vlog};
 use std::collections::{BTreeMap, VecDeque};
 use std::io::{BufRead, BufReader, Read, Write};
+#[cfg(unix)]
 use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::Path;
 use std::process::{Command, Stdio};
@@ -18,7 +19,7 @@ const POLL: Duration = Duration::from_millis(50);
 
 type Tail = Arc<Mutex<VecDeque<String>>>;
 
-/// Run `cmds` in order via `sh -c` in `cwd` with `env` added to the inherited environment.
+/// Run `cmds` in order via POSIX `sh -c` (`sys::find_sh`) in `cwd` with `env` added to the inherited environment.
 /// `timeout` covers the whole list. Returns the elapsed seconds, or `BerthError::Hook` naming
 /// the failed command, its status and the last 20 output lines.
 pub fn run_hooks(
@@ -45,20 +46,22 @@ fn run_one(
     deadline: Instant,
     timeout: Duration,
 ) -> Result<(), BerthError> {
-    let mut child = Command::new("sh")
+    let mut command = Command::new(sys::find_sh()?);
+    command
         .arg("-c")
         .arg(cmd)
         .current_dir(cwd)
         .envs(env)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .process_group(0)
-        .spawn()
-        .map_err(|source| BerthError::Io {
-            path: cwd.to_path_buf(),
-            source,
-        })?;
+        .stderr(Stdio::piped());
+    // Own process group on Unix; on Windows `sys::kill_tree` walks the child's tree instead.
+    #[cfg(unix)]
+    command.process_group(0);
+    let mut child = command.spawn().map_err(|source| BerthError::Io {
+        path: cwd.to_path_buf(),
+        source,
+    })?;
     let pgid = child.id();
     let tail: Tail = Arc::new(Mutex::new(VecDeque::new()));
     let (done_tx, done_rx) = mpsc::channel::<()>();
@@ -86,7 +89,7 @@ fn run_one(
             Ok(Some(status)) => break Some(status),
             Ok(None) => {}
             Err(source) => {
-                sys::kill_group(pgid);
+                sys::kill_tree(pgid);
                 let _ = child.wait();
                 return Err(BerthError::Io {
                     path: cwd.to_path_buf(),
@@ -95,7 +98,7 @@ fn run_one(
             }
         }
         if Instant::now() >= deadline {
-            sys::kill_group(pgid);
+            sys::kill_tree(pgid);
             let _ = child.wait();
             break None;
         }
@@ -104,7 +107,7 @@ fn run_one(
 
     if status.is_none_or(|s| !s.success()) {
         // Removes leftover background processes before any rollback.
-        sys::kill_group(pgid);
+        sys::kill_tree(pgid);
     }
     // A background `cmd &` (or a process that left the group) may hold the pipes open: wait a
     // bounded time, then detach the readers.
@@ -124,7 +127,11 @@ fn run_one(
     if status.success() {
         return Ok(());
     }
-    let text = match (status.code(), status.signal()) {
+    #[cfg(unix)]
+    let signal = status.signal();
+    #[cfg(not(unix))]
+    let signal: Option<i32> = None;
+    let text = match (status.code(), signal) {
         (Some(code), _) => format!("exited {code}"),
         (None, Some(sig)) => format!("killed by signal {sig}"),
         (None, None) => "failed".to_string(),

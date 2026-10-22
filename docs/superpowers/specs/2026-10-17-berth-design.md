@@ -276,8 +276,11 @@ never exported: they stay in `.env`, read by the app's own loader.
    someone else's). The setup hook (step 7) sees `$DATABASE_URL` and the other §7 variables.
 7. Run `[setup].run` in the worktree with the §7 env, output → stderr, with the timeout
    (`--no-setup` skips it).
-   Each hook runs in its own process group; a timeout or failure kills the whole group. Ctrl-C
-   does not reach the hook; if berth dies the hook keeps running and the entry shows
+   Hooks are POSIX `sh -c` commands on every OS. On Windows berth uses `sh.exe` from `PATH`, else
+   Git for Windows' (`<prefix>\bin\sh.exe` or `<prefix>\usr\bin\sh.exe`, derived from
+   `git --exec-path`); none found is exit 3 ("install Git for Windows"). Each hook runs in its
+   own process group (Windows: its process tree); a timeout or failure kills the whole group
+   (Windows: `taskkill /T /F /PID`). Ctrl-C does not reach the hook; if berth dies the hook keeps running and the entry shows
    `drift: interrupted`.
    A timeout fails the hook with status `timed out after Ns`; output readers are given 1 s to
    finish after the kill, then dropped, so a process that left the group cannot hang berth.
@@ -292,7 +295,10 @@ later. Steps 6-7 run unlocked.
 
 Atomic writes: temp file in the same directory, `fsync`, `rename`. Locks: `std::fs::File::lock`
 (advisory; confirm the stable MSRV at plan time), waiting up to 30 s, then exit 3 naming the lock
-holder recorded inside the lock file. A `creating` entry whose owner pid is gone is shown by `ls`
+holder recorded in the sidecar `<lock>.holder` (`pid=… host=… cmd=…`, written after the lock is
+taken, emptied before release; a sidecar because Windows locks are mandatory and a second handle
+cannot read the locked file). Process liveness and hostname are per OS (Windows: `tasklist`,
+`COMPUTERNAME`). A `creating` entry whose owner pid is gone is shown by `ls`
 and `doctor` as `drift: interrupted`; `down` cleans it.
 
 ## 9. Port allocation
