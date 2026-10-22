@@ -1,4 +1,5 @@
 use std::collections::BTreeMap;
+#[cfg(unix)]
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::Command;
@@ -9,7 +10,7 @@ use berth::manifest::{
     DbEntry, Entry, Manifest, Owner, PortBlock, SetupStatus, State, manifest_path, write_atomic,
 };
 use berth::registry::{Block, Registry, state_dir_from};
-use berth::sys::{kill_group, pid_alive, rfc3339};
+use berth::sys::{find_sh, kill_tree, pid_alive, rfc3339, tasklist_lists_pid};
 
 fn entry(task: &str) -> Entry {
     Entry {
@@ -131,19 +132,30 @@ fn atomic_write_leaves_no_temp() {
 
 #[test]
 fn state_dir_precedence() {
+    // Absolute on every OS: `/b` has no drive on Windows.
+    let abs = |p: &str| {
+        if cfg!(windows) {
+            format!("C:{p}")
+        } else {
+            p.to_string()
+        }
+    };
     let all = |k: &str| match k {
-        "BERTH_STATE_DIR" => Some("/b".to_string()),
-        "XDG_STATE_HOME" => Some("/x".to_string()),
-        "HOME" => Some("/h".to_string()),
+        "BERTH_STATE_DIR" => Some(abs("/b")),
+        "XDG_STATE_HOME" => Some(abs("/x")),
+        "HOME" => Some(abs("/h")),
         _ => None,
     };
-    assert_eq!(state_dir_from(all).unwrap(), Path::new("/b"));
+    assert_eq!(state_dir_from(all).unwrap(), Path::new(&abs("/b")));
     let no_berth = |k: &str| if k == "BERTH_STATE_DIR" { None } else { all(k) };
-    assert_eq!(state_dir_from(no_berth).unwrap(), Path::new("/x/berth"));
-    let only_home = |k: &str| (k == "HOME").then(|| "/h".to_string());
+    assert_eq!(
+        state_dir_from(no_berth).unwrap(),
+        Path::new(&abs("/x/berth"))
+    );
+    let only_home = |k: &str| (k == "HOME").then(|| abs("/h"));
     assert_eq!(
         state_dir_from(only_home).unwrap(),
-        Path::new("/h/.local/state/berth")
+        Path::new(&abs("/h/.local/state/berth"))
     );
     assert!(matches!(state_dir_from(|_| None), Err(BerthError::Env(_))));
 }
@@ -173,13 +185,43 @@ fn registry_release_removes_all() {
 #[test]
 fn pid_alive_dead_and_live() {
     assert!(pid_alive(std::process::id(), &berth::sys::hostname()));
-    let mut child = Command::new("true").spawn().unwrap();
+    let mut child = Command::new(find_sh().unwrap())
+        .args(["-c", "true"])
+        .spawn()
+        .unwrap();
     let pid = child.id();
     child.wait().unwrap();
     assert!(!pid_alive(pid, &berth::sys::hostname()));
     assert!(pid_alive(pid, "elsewhere"));
 }
 
+#[test]
+fn tasklist_rows_are_matched_on_the_pid_field() {
+    let row = "\"sh.exe\",\"4242\",\"Console\",\"1\",\"3,512 K\"\r\n";
+    assert!(tasklist_lists_pid(row, 4242));
+    assert!(!tasklist_lists_pid(row, 1));
+    assert!(!tasklist_lists_pid(
+        "INFO: No tasks are running which match the specified criteria.\r\n",
+        4242
+    ));
+}
+
+#[test]
+fn kill_tree_kills_the_child() {
+    let mut command = Command::new(find_sh().unwrap());
+    command.args(["-c", "sleep 30"]);
+    // On Unix kill_tree signals the group the pid leads, as hooks arrange.
+    #[cfg(unix)]
+    command.process_group(0);
+    let mut child = command.spawn().unwrap();
+    kill_tree(child.id());
+    let start = Instant::now();
+    child.wait().unwrap();
+    assert!(start.elapsed() < Duration::from_secs(10));
+}
+
+// Unix-only: needs `process_group(0)`, and `$!` is a POSIX pid that `tasklist` does not know.
+#[cfg(unix)]
 #[test]
 fn kill_group_kills_group() {
     use std::io::{BufRead, BufReader};
@@ -197,7 +239,7 @@ fn kill_group_kills_group() {
     let sleep_pid: u32 = line.trim().parse().unwrap();
     let host = berth::sys::hostname();
     assert!(pid_alive(sleep_pid, &host));
-    kill_group(child.id());
+    kill_tree(child.id());
     let start = Instant::now();
     child.wait().unwrap();
     assert!(start.elapsed() < Duration::from_secs(2));
@@ -208,7 +250,7 @@ fn kill_group_kills_group() {
     }
     assert!(
         !pid_alive(sleep_pid, &host),
-        "sleep child survived kill_group"
+        "sleep child survived kill_tree"
     );
 }
 

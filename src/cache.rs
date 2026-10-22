@@ -138,7 +138,7 @@ pub fn hoard_quiet(main: &Path, cache: &CacheCfg) -> Option<Hoard> {
 
 /// The server's port and token files, or the file that is missing, invalid or empty.
 fn locate(main: &Path, cache: &CacheCfg) -> Result<Hoard, (PathBuf, &'static str)> {
-    let dir = main.join(&cache.hoard_dir);
+    let dir = main.join(crate::sys::native(&cache.hoard_dir));
     let port_file = dir.join("port");
     let token_file = dir.join("token");
     let port = match fs::read_to_string(&port_file) {

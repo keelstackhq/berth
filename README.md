@@ -29,7 +29,7 @@ cargo install --path .        # package `keel-berth`, installs the binary `berth
 berth up <task> [--base REF] [--branch NAME] [--no-setup] [--keep-on-failure] [--json]
 berth down <task> [--force] [--delete-branch] [--json]
 berth ls [--json]
-berth env [<task>] [--format sh|fish|dotenv|json]
+berth env [<task>] [--format sh|fish|pwsh|dotenv|json]
 berth doctor [--json]
 berth gc [--dry-run] [--delete-branch] [--json]
 berth hook worktree-create|worktree-remove|session-start|statusline   (Claude Code; JSON on stdin)
@@ -45,7 +45,7 @@ to stderr, never file contents or env values). `<task>` is a slug `^[a-z0-9][a-z
   worktree (`--force` overrides). The branch stays unless `--delete-branch` and it is merged
   into `[worktree].base`.
 - `ls` lists worktrees with state, ahead/behind, dirty and listening ports. `env` prints the
-  environment of a task, or of the worktree you are in: `eval "$(berth env)"`.
+  environment of a task, or of the worktree you are in: `eval "$(berth env)"` (PowerShell: `berth env --format pwsh | Out-String | Invoke-Expression`).
 - `doctor` checks git, config, copy rules, root, port registry, manifest and owners, plus the
   database tools, the sqlite template, turbo seeding and the hoard server when configured.
   `ls`, `env` and `doctor` take no locks and write nothing.

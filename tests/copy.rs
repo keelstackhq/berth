@@ -6,6 +6,7 @@ use berth::git::{self, Repo};
 use berth::report::{Action, Item};
 use common::{Fixture, git as run_git, write};
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::{PermissionsExt, symlink};
 
 const MAX: u64 = 1_048_576;
@@ -48,6 +49,7 @@ fn copies_ignored_env_byte_for_byte() {
     let fx = Fixture::new();
     let bytes = [0xff_u8, 0x00, b'\n'];
     fs::write(fx.repo.join(".env"), bytes).unwrap();
+    #[cfg(unix)]
     fs::set_permissions(fx.repo.join(".env"), fs::Permissions::from_mode(0o600)).unwrap();
     let p = plan(&fx, &[".env"]);
     assert_eq!(p.files, vec![".env".to_string()]);
@@ -58,8 +60,12 @@ fn copies_ignored_env_byte_for_byte() {
     assert_eq!((item.kind.as_str(), item.key.as_str()), ("copy", ".env"));
     assert_eq!(item.action, Action::Create);
     assert_eq!(fs::read(wt.join(".env")).unwrap(), bytes);
-    let mode = fs::metadata(wt.join(".env")).unwrap().permissions().mode();
-    assert_eq!(mode & 0o777, 0o600);
+    // Unix-only: Windows has no mode bits.
+    #[cfg(unix)]
+    {
+        let mode = fs::metadata(wt.join(".env")).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o600);
+    }
     assert_eq!(fs::read_dir(wt.join(".berth/tmp")).unwrap().count(), 0);
 }
 
@@ -110,6 +116,8 @@ fn glob_matches_one_level() {
     assert!(p.refused.is_empty());
 }
 
+// Unix-only: creates symlinks, which needs privileges on Windows
+#[cfg(unix)]
 #[test]
 fn symlink_and_oversize_refused() {
     let fx = Fixture::new();
@@ -129,6 +137,8 @@ fn symlink_and_oversize_refused() {
     );
 }
 
+// Unix-only: creates symlinks, which needs privileges on Windows
+#[cfg(unix)]
 #[test]
 fn target_symlink_parent_refused() {
     let fx = Fixture::new();
@@ -221,6 +231,8 @@ fn canary_never_appears_in_items() {
     assert!(!shown.contains(canary), "{shown}");
 }
 
+// Unix-only: creates symlinks, which needs privileges on Windows
+#[cfg(unix)]
 #[test]
 fn symlinked_staging_dir_refused() {
     let fx = Fixture::new();
@@ -244,6 +256,8 @@ fn symlinked_staging_dir_refused() {
     assert!(!wt.join(".env").exists());
 }
 
+// Unix-only: creates symlinks, which needs privileges on Windows
+#[cfg(unix)]
 #[test]
 fn source_changed_after_plan_refused() {
     let fx = Fixture::new();
@@ -296,6 +310,8 @@ fn existing_target_left_alone_and_tmp_clean() {
     assert_eq!(fs::read_dir(wt.join(".berth/tmp")).unwrap().count(), 0);
 }
 
+// Unix-only: Windows file names are UTF-16, so a non-UTF-8 name cannot exist.
+#[cfg(unix)]
 #[test]
 fn non_utf8_path_refused_without_failing_plan() {
     use std::ffi::OsStr;

@@ -10,7 +10,7 @@ use crate::cli::UpArgs;
 use crate::config::{self, Config, Provider, Seed};
 use crate::copy;
 use crate::db::{self, DbPlan};
-use crate::env::{EnvInput, build_env, sh_quote};
+use crate::env::{EnvInput, build_env};
 use crate::git::{self, Repo};
 use crate::hooks::run_hooks;
 use crate::lock::{self, LockGuard};
@@ -63,10 +63,7 @@ pub(super) fn state_name(state: State) -> &'static str {
 }
 
 fn hint(path: &Path) -> String {
-    format!(
-        "cd {} && eval \"$(berth env)\"",
-        sh_quote(&path.display().to_string())
-    )
+    crate::env::next_command_hint(&path.display().to_string(), cfg!(windows))
 }
 
 pub(super) fn ports_item(block: &PortBlock, action: Action) -> Item {

@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::Output;
 
 fn canon(p: &Path) -> PathBuf {
-    fs::canonicalize(p).expect("canonicalize")
+    berth::sys::canonicalize(p).expect("canonicalize")
 }
 
 fn wt(fx: &Fixture, task: &str) -> PathBuf {
@@ -121,9 +121,9 @@ fn stale_registry_is_drift() {
     let gone = fx.root.path().join("gone");
     let (lo, _) = fx.range;
     let reg = format!(
-        r#"{{"version":1,"blocks":[{{"start":{lo},"end":{},"repo":"{}","task":"t","created_at":"2026-10-17T00:00:00Z"}}]}}"#,
+        r#"{{"version":1,"blocks":[{{"start":{lo},"end":{},"repo":{},"task":"t","created_at":"2026-10-17T00:00:00Z"}}]}}"#,
         lo + 9,
-        gone.display()
+        serde_json::to_string(&gone).unwrap()
     );
     write(&fx.state, "ports.json", &reg);
     let (code, v) = doctor(&fx);
@@ -320,6 +320,8 @@ fn find<'a>(v: &'a Value, kind: &str, key: &str) -> &'a Value {
         .unwrap_or_else(|| panic!("no {kind} {key} item: {v}"))
 }
 
+// Unix-only: fake binaries are #!/bin/sh scripts with exec bits
+#[cfg(unix)]
 fn fake_db_tools(fx: &Fixture) -> PathBuf {
     let log = fx.root.path().join("tools.log");
     for tool in ["createdb", "dropdb", "docker"] {
@@ -328,6 +330,8 @@ fn fake_db_tools(fx: &Fixture) -> PathBuf {
     log
 }
 
+// Unix-only: helper of the fake-binary tests
+#[cfg(unix)]
 fn pg(fx: &Fixture) {
     fx.config(&fx.repo, "", "[db]\nprovider = \"postgres\"");
 }
@@ -342,6 +346,8 @@ fn no_db_or_cache_config_adds_no_items() {
     assert!(items(&v, "cache").is_empty());
 }
 
+// Unix-only: needs Fixture::fake_bin (a #!/bin/sh script with an exec bit)
+#[cfg(unix)]
 #[test]
 fn db_tools_present_are_ok_and_never_run() {
     let fx = Fixture::new();
@@ -353,6 +359,8 @@ fn db_tools_present_are_ok_and_never_run() {
     assert!(!log.exists(), "doctor ran a database tool");
 }
 
+// Unix-only: fake binaries are #!/bin/sh scripts with exec bits
+#[cfg(unix)]
 #[test]
 fn missing_db_tools_are_drift_with_the_hint() {
     let fx = Fixture::new();
@@ -375,6 +383,8 @@ fn missing_db_tools_are_drift_with_the_hint() {
     );
 }
 
+// Unix-only: fake binaries are #!/bin/sh scripts with exec bits
+#[cfg(unix)]
 #[test]
 fn compose_without_docker_is_drift() {
     let fx = Fixture::new();
@@ -416,6 +426,8 @@ fn sqlite_healthy_is_ok() {
     assert!(items(&v, "db").iter().all(|i| i["key"] != "tools"));
 }
 
+// Unix-only: helper of the fake-binary tests
+#[cfg(unix)]
 #[test]
 fn sqlite_problems_are_drift_not_errors() {
     // Missing template.
@@ -458,6 +470,8 @@ fn sqlite_problems_are_drift_not_errors() {
     assert!(item["reason"].as_str().unwrap().contains(".gitignore"));
 }
 
+// Unix-only: helper of the fake-binary tests
+#[cfg(unix)]
 fn set_created(fx: &Fixture, created: bool) {
     let path = fx.repo.join(".agents/worktrees.json");
     let mut v: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
@@ -465,6 +479,8 @@ fn set_created(fx: &Fixture, created: bool) {
     fs::write(&path, serde_json::to_vec_pretty(&v).unwrap()).unwrap();
 }
 
+// Unix-only: needs Fixture::fake_bin (a #!/bin/sh script with an exec bit)
+#[cfg(unix)]
 #[test]
 fn postgres_entry_not_recorded_as_created_is_drift() {
     let fx = Fixture::new();

@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 const CANARY: &str = "BERTH_CANARY_7c2e";
 
 fn canon(p: &Path) -> PathBuf {
-    fs::canonicalize(p).expect("canonicalize")
+    berth::sys::canonicalize(p).expect("canonicalize")
 }
 
 fn base_dir(fx: &Fixture) -> PathBuf {
@@ -106,12 +106,21 @@ fn ls_shows_two_tasks() {
 
     let out = berth(&fx, &["ls"]);
     assert_eq!(code(&out), 0, "{}", stderr(&out));
+    // One snapshot for every OS: Windows paths are shown with `/`.
+    let slash = |s: String| {
+        if cfg!(windows) {
+            s.replace('\\', "/")
+        } else {
+            s
+        }
+    };
     let mut settings = insta::Settings::clone_current();
     settings.add_filter(
-        &regex_escape(&canon(fx.root.path()).display().to_string()),
+        &regex_escape(&slash(canon(fx.root.path()).display().to_string())),
         "[ROOT]",
     );
-    settings.bind(|| insta::assert_snapshot!("ls_shows_two_tasks_table", stdout(&out)));
+    let text = slash(stdout(&out));
+    settings.bind(|| insta::assert_snapshot!("ls_shows_two_tasks_table", text));
 }
 
 #[test]
@@ -214,12 +223,14 @@ fn ls_never_blocks_on_repo_lock() {
     let started = Instant::now();
     let out = fx
         .berth()
-        .env("BERTH_LOCK_TIMEOUT_MS", "300")
+        .env("BERTH_LOCK_TIMEOUT_MS", "5000")
         .args(["ls"])
         .output()
         .unwrap();
     assert_eq!(code(&out), 0, "{}", stderr(&out));
-    assert!(started.elapsed() < Duration::from_secs(1));
+    // Waiting for the lock would take the whole 5 s timeout; a fixed 1 s bound flaked on slow
+    // process start (Windows).
+    assert!(started.elapsed() < Duration::from_secs(4));
 }
 
 #[test]
@@ -292,7 +303,7 @@ fn env_does_not_include_copied_values() {
     write(&fx.repo, ".env", &format!("TOKEN={CANARY}\n"));
     fx.config(&fx.repo, "", "[copy]\ninclude = [\".env\"]");
     up(&fx, "a");
-    for fmt in ["sh", "fish", "dotenv", "json"] {
+    for fmt in ["sh", "fish", "pwsh", "dotenv", "json"] {
         let out = berth(&fx, &["env", "a", "--format", fmt]);
         assert_eq!(code(&out), 0, "{}", stderr(&out));
         assert!(!stdout(&out).contains(CANARY), "{fmt}");

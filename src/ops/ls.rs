@@ -54,7 +54,7 @@ pub fn ls(ctx: &Ctx) -> Result<Report, BerthError> {
 }
 
 fn canon(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    crate::sys::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 fn entry_item(main: &Path, entry: &Entry, registered: &BTreeSet<PathBuf>) -> Item {

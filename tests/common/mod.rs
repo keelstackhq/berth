@@ -7,14 +7,31 @@ use std::process::Command as Std;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use tempfile::TempDir;
 
-const GIT_ENV: [(&str, &str); 6] = [
-    ("GIT_CONFIG_GLOBAL", "/dev/null"),
-    ("GIT_CONFIG_NOSYSTEM", "1"),
-    ("GIT_AUTHOR_NAME", "berth-test"),
-    ("GIT_AUTHOR_EMAIL", "berth-test@example.invalid"),
-    ("GIT_COMMITTER_NAME", "berth-test"),
-    ("GIT_COMMITTER_EMAIL", "berth-test@example.invalid"),
-];
+/// An empty file used as `GIT_CONFIG_GLOBAL`: `/dev/null` is not a path git understands
+/// everywhere (Windows), an empty file is. Created once per run, never written to.
+fn empty_git_config() -> String {
+    let path = std::env::temp_dir().join("berth-test-empty-gitconfig");
+    if !path.exists() {
+        let _ = fs::write(&path, b"");
+    }
+    path.display().to_string()
+}
+
+/// The hermetic git environment: no user or system config, fixed identity, and
+/// `core.autocrlf=false` even for a git started by a hook through `sh -c`.
+fn git_env() -> Vec<(&'static str, String)> {
+    vec![
+        ("GIT_CONFIG_GLOBAL", empty_git_config()),
+        ("GIT_CONFIG_NOSYSTEM", "1".into()),
+        ("GIT_CONFIG_COUNT", "1".into()),
+        ("GIT_CONFIG_KEY_0", "core.autocrlf".into()),
+        ("GIT_CONFIG_VALUE_0", "false".into()),
+        ("GIT_AUTHOR_NAME", "berth-test".into()),
+        ("GIT_AUTHOR_EMAIL", "berth-test@example.invalid".into()),
+        ("GIT_COMMITTER_NAME", "berth-test".into()),
+        ("GIT_COMMITTER_EMAIL", "berth-test@example.invalid".into()),
+    ]
+}
 
 /// A throwaway world: repo, HOME, state dir and TMPDIR all live under `root`.
 pub struct Fixture {
@@ -54,7 +71,7 @@ impl Fixture {
 
     /// First 6 hex chars of FNV-1a over the canonical main checkout path (the default-name hash).
     pub fn hash6(&self) -> String {
-        let main = fs::canonicalize(&self.repo).expect("canonicalize repo");
+        let main = berth::sys::canonicalize(&self.repo).expect("canonicalize repo");
         let h = berth::ports::fnv1a64(main.as_os_str().as_encoded_bytes());
         format!("{h:016x}")[..6].to_string()
     }
@@ -85,11 +102,19 @@ impl Fixture {
 
     /// `<root>/bin` first, then the inherited `PATH`.
     pub fn path_with_bin(&self) -> String {
-        let rest = std::env::var("PATH").unwrap_or_default();
-        format!("{}:{rest}", self.bin.display())
+        let mut dirs = vec![self.bin.clone()];
+        dirs.extend(std::env::split_paths(
+            &std::env::var_os("PATH").unwrap_or_default(),
+        ));
+        std::env::join_paths(dirs)
+            .expect("join PATH")
+            .to_string_lossy()
+            .into_owned()
     }
 
     /// Write an executable `<root>/bin/<name>` (`#!/bin/sh` + `script`).
+    // Unix-only: relies on exec bits and the `#!/bin/sh` shebang.
+    #[cfg(unix)]
     pub fn fake_bin(&self, name: &str, script: &str) -> PathBuf {
         use std::os::unix::fs::PermissionsExt;
         let path = self.bin.join(name);
@@ -100,6 +125,8 @@ impl Fixture {
 
     /// A `PATH` of one directory, `<root>/onlybin`, with symlinks to the real `git`, `sh`,
     /// `cat`, `env` and the fake bins only (for "tool missing" tests).
+    // Unix-only: creating symlinks needs privileges on Windows.
+    #[cfg(unix)]
     pub fn isolated_path(&self) -> String {
         let dir = self.root.path().join("onlybin");
         fs::create_dir_all(&dir).expect("mkdir onlybin");
@@ -125,7 +152,7 @@ impl Fixture {
             .env("TMPDIR", &self.tmp)
             .env("PATH", self.path_with_bin())
             .env_remove("XDG_STATE_HOME");
-        for (k, v) in GIT_ENV {
+        for (k, v) in git_env() {
             cmd.env(k, v);
         }
         cmd
@@ -139,7 +166,7 @@ impl Fixture {
             .env("TMPDIR", &self.tmp)
             .env("PATH", self.path_with_bin())
             .env_remove("XDG_STATE_HOME");
-        for (k, v) in GIT_ENV {
+        for (k, v) in git_env() {
             cmd.env(k, v);
         }
         cmd
@@ -158,7 +185,7 @@ fn init_repo(path: &Path) {
 pub fn git(dir: &Path, args: &[&str]) -> String {
     let mut cmd = Std::new("git");
     cmd.args(args).current_dir(dir);
-    for (k, v) in GIT_ENV {
+    for (k, v) in git_env() {
         cmd.env(k, v);
     }
     let out = cmd.output().expect("run git");
@@ -187,4 +214,10 @@ pub fn write(dir: &Path, rel: &str, content: &str) {
         fs::create_dir_all(parent).expect("mkdir");
     }
     fs::write(path, content).expect("write");
+}
+
+/// A path as text for a TOML string or an `sh` script: forward slashes, which `sh` and Windows
+/// both accept (backslashes are escapes in TOML and in unquoted sh).
+pub fn sh_path(path: &Path) -> String {
+    path.display().to_string().replace('\\', "/")
 }

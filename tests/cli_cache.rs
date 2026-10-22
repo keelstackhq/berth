@@ -3,12 +3,30 @@ mod common;
 use common::{Fixture, git, write};
 use serde_json::Value;
 use std::fs;
-use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::Output;
 
+/// Whether `a` and `b` are the same file (hard links). Unix compares inodes; elsewhere an
+/// append through `a` must show up in `b`. The append changes `a`, so call this last.
+fn same_file(a: &Path, b: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        fs::metadata(a).unwrap().ino() == fs::metadata(b).unwrap().ino()
+    }
+    #[cfg(not(unix))]
+    {
+        use std::io::Write;
+        let before = fs::read(b).unwrap();
+        let mut f = fs::OpenOptions::new().append(true).open(a).unwrap();
+        f.write_all(b"+").unwrap();
+        drop(f);
+        fs::read(b).unwrap() != before
+    }
+}
+
 fn canon(p: &Path) -> PathBuf {
-    fs::canonicalize(p).expect("canonicalize")
+    berth::sys::canonicalize(p).expect("canonicalize")
 }
 
 fn wt(fx: &Fixture, task: &str) -> PathBuf {
@@ -90,9 +108,9 @@ fn link_mode_shares_inodes_and_skips_tmp_and_subdirs() {
         ["h1-meta.json", "h1.tar.zst", "h2.tar.zst"]
     );
     for name in ["h1.tar.zst", "h1-meta.json", "h2.tar.zst"] {
-        let a = fs::metadata(fx.repo.join(".turbo/cache").join(name)).unwrap();
-        let b = fs::metadata(seeded_dir.join(name)).unwrap();
-        assert_eq!(a.ino(), b.ino(), "{name} should be hard linked");
+        let a = fx.repo.join(".turbo/cache").join(name);
+        let b = seeded_dir.join(name);
+        assert!(same_file(&a, &b), "{name} should be hard linked");
     }
 }
 
@@ -130,11 +148,8 @@ fn copy_mode_copies_bytes_with_new_inodes() {
     for name in ["h1.tar.zst", "h1-meta.json", "h2.tar.zst"] {
         let src = fx.repo.join(".turbo/cache").join(name);
         let dst = seeded_dir.join(name);
-        assert_ne!(
-            fs::metadata(&src).unwrap().ino(),
-            fs::metadata(&dst).unwrap().ino()
-        );
         assert_eq!(fs::read(&src).unwrap(), fs::read(&dst).unwrap());
+        assert!(!same_file(&src, &dst), "{name} should be a copy");
     }
 }
 
@@ -227,7 +242,11 @@ fn hoard_fixture(rest: &str) -> Fixture {
 }
 
 fn token_path(fx: &Fixture) -> String {
-    canon(&fx.repo).join(".hoard/token").display().to_string()
+    canon(&fx.repo)
+        .join(".hoard")
+        .join("token")
+        .display()
+        .to_string()
 }
 
 #[test]
@@ -240,7 +259,7 @@ fn hooks_get_the_hoard_variables() {
         &format!(
             "[cache]\nremote = \"hoard\"\n[setup]\nrun = [\"echo \\\"$TURBO_API $TURBO_TEAM $TURBO_TOKEN\\\" > .hoard-seen\"]\n\
              [teardown]\nrun = [\"echo \\\"$TURBO_API $TURBO_TEAM $TURBO_TOKEN\\\" > '{}'\"]",
-            seen.display()
+            common::sh_path(&seen)
         ),
     );
     let out = run(&fx, &["up", "a", "-v"]);
@@ -269,7 +288,7 @@ fn rollback_teardown_gets_the_hoard_variables() {
         &format!(
             "[cache]\nremote = \"hoard\"\n[setup]\nrun = [\"exit 4\"]\n\
              [teardown]\nrun = [\"echo \\\"$TURBO_TOKEN\\\" > '{}'\"]",
-            seen.display()
+            common::sh_path(&seen)
         ),
     );
     let out = run(&fx, &["up", "a"]);
@@ -334,7 +353,33 @@ fn env_fish_reads_the_token_file() {
     );
     assert_eq!(
         text.lines().last().unwrap(),
-        format!("set -gx TURBO_TOKEN (cat '{}')", token_path(&fx))
+        // fish doubles `\` inside single quotes (Windows paths).
+        format!(
+            "set -gx TURBO_TOKEN (cat '{}')",
+            token_path(&fx).replace('\\', "\\\\")
+        )
+    );
+}
+
+#[test]
+fn env_pwsh_reads_the_token_file() {
+    let fx = hoard_fixture("");
+    assert_eq!(code(&run(&fx, &["up", "a"])), 0);
+    let out = run(&fx, &["env", "a", "--format", "pwsh"]);
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    let text = stdout(&out);
+    assert!(!text.contains(CANARY));
+    assert!(
+        text.contains("$env:TURBO_API = 'http://127.0.0.1:41234'\n"),
+        "{text}"
+    );
+    assert!(text.contains("$env:TURBO_TEAM = 'hoard'\n"), "{text}");
+    assert_eq!(
+        text.lines().last().unwrap(),
+        format!(
+            "$env:TURBO_TOKEN = (Get-Content -Raw -LiteralPath '{}').Trim()",
+            token_path(&fx)
+        )
     );
 }
 
@@ -456,7 +501,7 @@ fn hoard_dir_is_relative_to_main() {
         stdout(&out)
     );
     assert!(
-        stdout(&out).contains("state/hoard/token"),
+        stdout(&out).contains(&berth::sys::native("state/hoard/token")),
         "{}",
         stdout(&out)
     );

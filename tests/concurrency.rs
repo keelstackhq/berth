@@ -194,7 +194,7 @@ fn killed_up_recovers() {
 fn lock_timeout_names_holder() {
     let fx = Fixture::new();
     fx.config(&fx.repo, "", "");
-    let common = fs::canonicalize(fx.repo.join(".git")).unwrap();
+    let common = berth::sys::canonicalize(fx.repo.join(".git")).unwrap();
     let _guard = lock::acquire(&lock::repo_lock(&common), Duration::from_secs(5)).unwrap();
     let out = fx
         .berth()
@@ -214,7 +214,10 @@ fn lock_timeout_names_holder() {
 fn lock_timeout_after_setup_says_run_down() {
     let fx = Fixture::new();
     let marker = fx.root.path().join("setup-started");
-    let setup = format!("[setup]\nrun = [\"touch '{}'; sleep 1\"]", marker.display());
+    let setup = format!(
+        "[setup]\nrun = [\"touch '{}'; sleep 1\"]",
+        common::sh_path(&marker)
+    );
     fx.config(&fx.repo, "", &setup);
     let child = fx
         .berth_std()
@@ -230,7 +233,7 @@ fn lock_timeout_after_setup_says_run_down() {
         assert!(Instant::now() < deadline, "setup never started");
         std::thread::sleep(Duration::from_millis(20));
     }
-    let common = fs::canonicalize(fx.repo.join(".git")).unwrap();
+    let common = berth::sys::canonicalize(fx.repo.join(".git")).unwrap();
     let _guard = lock::acquire(&lock::repo_lock(&common), Duration::from_secs(5)).unwrap();
     let out = child.wait_with_output().unwrap();
     let err = String::from_utf8_lossy(&out.stderr);

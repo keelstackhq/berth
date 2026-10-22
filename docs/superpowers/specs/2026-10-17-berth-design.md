@@ -53,7 +53,7 @@ missing per-task state (files, ports, caches, DB, manifest) and composes with al
 berth up <task> [--base REF] [--branch NAME] [--no-setup] [--keep-on-failure] [--json]
 berth down <task> [--force] [--delete-branch] [--json]
 berth ls [--json]
-berth env [<task>] [--format sh|fish|dotenv|json]   task defaults to the worktree of the cwd
+berth env [<task>] [--format sh|fish|pwsh|dotenv|json]   task defaults to the worktree of the cwd
 berth gc [--dry-run] [--delete-branch] [--json]
 berth doctor [--json]
 berth hook worktree-create|worktree-remove|session-start|statusline   JSON payload on stdin
@@ -79,7 +79,8 @@ the rule shared by the family: `0` go, `1` look at `items`, `3` fix the environm
 ### Output
 
 Human output: a short table plus the next command (`cd ../hull.berth/fix-login && eval
-"$(berth env)"`). Logs and hook output go to stderr.
+"$(berth env)"`; on Windows `Set-Location -LiteralPath '..\hull.berth\fix-login'; berth env
+--format pwsh | Out-String | Invoke-Expression`). Logs and hook output go to stderr.
 
 `--json` prints exactly one object on stdout:
 `{ "version": 1, "command", "ok", "exit_code", "items": [ { "kind", "key", "action", "reason" } ],
@@ -231,7 +232,8 @@ Per user (ports are machine-wide): `$BERTH_STATE_DIR`, else `$XDG_STATE_HOME/ber
 - Caches, all inside the worktree (removed with it): `TURBO_CACHE_DIR=<wt>/.turbo/cache`,
   `VITE_CACHE_PATH=<wt>/node_modules/.vite/task-cache` (the variable hoard reads; confirm Vite+
   honours it at plan time), `CARGO_TARGET_DIR=<wt>/target` (a shared target dir serialises
-  builds on cargo's lock), `TMPDIR=<wt>/.berth/tmp`.
+  builds on cargo's lock), `TMPDIR=<wt>/.berth/tmp`. Paths use the OS separator (`\` on
+  Windows, also in `{db.path}` and the hoard token path); the sqlite `file:` URL uses `/`.
 - `[env]` values with placeholders `{repo}`, `{task}`, `{task_snake}`, `{port.<name>}`,
   `{port.base}`, `{worktree}`; with `[db]` also `{db.url}` (when a URL exists), `{db.name}`
   (postgres, compose) and `{db.path}` (sqlite). Unknown placeholder → exit 3.
@@ -249,11 +251,13 @@ Per user (ports are machine-wide): `$BERTH_STATE_DIR`, else `$XDG_STATE_HOME/ber
 - With `[cache] remote = "hoard"` and a running server (§12), `berth env` adds `TURBO_API` and
   `TURBO_TEAM=hoard`, read live (never stored in the manifest or `--json`). `sh` ends with
   `export TURBO_TOKEN="$(cat '<token file>')"` and `fish` with `set -gx TURBO_TOKEN (cat '<token
-  file>')`, so the token is never printed; `dotenv`/`json` omit it and say
+  file>')`, `pwsh` with `$env:TURBO_TOKEN = (Get-Content -Raw -LiteralPath '<token file>').Trim()`, so the token is never printed; `dotenv`/`json` omit it and say
   `note: TURBO_TOKEN is not printed; read it from <token file>` on stderr. Setup and teardown hooks
   get all three with the real token. No server: nothing exported, one `warning:` on stderr, exit 0.
 
-Formats: `sh` (`export K='v'`, escaped), `fish`, `dotenv`, `json`. Copied files' values are
+Formats: `sh` (`export K='v'`, escaped), `fish`, `pwsh` (`$env:K = 'v'`: single quotes, `'` and
+the typographic quotes U+2018/2019/201A/201B doubled; `$`, backtick, `"` and newlines are literal),
+`dotenv`, `json`. Copied files' values are
 never exported: they stay in `.env`, read by the app's own loader.
 
 ## 8. `berth up`, step by step
@@ -299,8 +303,11 @@ never exported: they stay in `.env`, read by the app's own loader.
    someone else's). The setup hook (step 7) sees `$DATABASE_URL` and the other §7 variables.
 7. Run `[setup].run` in the worktree with the §7 env, output → stderr, with the timeout
    (`--no-setup` skips it).
-   Each hook runs in its own process group; a timeout or failure kills the whole group. Ctrl-C
-   does not reach the hook; if berth dies the hook keeps running and the entry shows
+   Hooks are POSIX `sh -c` commands on every OS. On Windows berth uses `sh.exe` from `PATH`, else
+   Git for Windows' (`<prefix>\bin\sh.exe` or `<prefix>\usr\bin\sh.exe`, derived from
+   `git --exec-path`); none found is exit 3 ("install Git for Windows"). Each hook runs in its
+   own process group (Windows: its process tree); a timeout or failure kills the whole group
+   (Windows: `taskkill /T /F /PID`). Ctrl-C does not reach the hook; if berth dies the hook keeps running and the entry shows
    `drift: interrupted`.
    A timeout fails the hook with status `timed out after Ns`; output readers are given 1 s to
    finish after the kill, then dropped, so a process that left the group cannot hang berth.
@@ -315,7 +322,10 @@ later. Steps 6-7 run unlocked.
 
 Atomic writes: temp file in the same directory, `fsync`, `rename`. Locks: `std::fs::File::lock`
 (advisory; confirm the stable MSRV at plan time), waiting up to 30 s, then exit 3 naming the lock
-holder recorded inside the lock file. A `creating` entry whose owner pid is gone is shown by `ls`
+holder recorded in the sidecar `<lock>.holder` (`pid=… host=… cmd=…`, written after the lock is
+taken, emptied before release; a sidecar because Windows locks are mandatory and a second handle
+cannot read the locked file). Process liveness and hostname are per OS (Windows: `tasklist`,
+`COMPUTERNAME`). A `creating` entry whose owner pid is gone is shown by `ls`
 and `doctor` as `drift: interrupted`; `down` cleans it.
 
 ## 9. Port allocation
@@ -462,8 +472,11 @@ writes no file and never connects to a database or runs `createdb`, `dropdb` or 
 
 - **Hermetic by rule.** Tests never touch the user's repos, real ports outside the test range, the
   network or `~`: `tests/common::berth()` sets `BERTH_STATE_DIR` and `HOME` to a temp dir,
-  `GIT_CONFIG_GLOBAL` to an empty file, author env vars, `TMPDIR` to a writable dir, and a test
+  `GIT_CONFIG_GLOBAL` to an empty file (not `/dev/null`, which Windows git does not know), `core.autocrlf=false`, author env vars, `TMPDIR` to a writable dir, and a test
   port range unique per test process. No network or TLS crates exist in the dependency tree.
+- **Windows.** The full suite runs on `windows-latest`. Tests needing Unix-only features (symlink
+  creation, exec bits, `#!/bin/sh` fake binaries via `Fixture::fake_bin`, the `onlybin` PATH,
+  signals, process groups) are `#[cfg(unix)]`, each with a one-line reason.
 - **Temp git repos.** Fixtures build repos with `git init` in temp dirs: plain, pnpm-workspace
   shaped, with `.env` ignored, with `.env` tracked (refusal), with an existing branch.
 - **Unit:** config and unknown keys; placeholders; slot hash (frozen vectors); allocation with a
@@ -508,7 +521,7 @@ All fetching-free; versions are **not** stated here and are pinned exactly in th
 
 ## 16. CI and release
 
-- `.github/workflows/ci.yml`: one job, matrix `ubuntu-latest` + `macos-latest`: `cargo fmt --check`,
+- `.github/workflows/ci.yml`: one job, matrix (`fail-fast: false`) `ubuntu-latest` + `macos-latest` + `windows-latest`: `cargo fmt --check`,
   `cargo clippy --all-targets --locked -- -D warnings`, `cargo test` (nextest if installed). Plus a
   `ci-ok` aggregate, the family pattern. No network in tests, so no secrets in CI.
 - Release (M3) through `hoist release`: static musl Linux and macOS binaries on GitHub Releases,
@@ -561,6 +574,15 @@ All fetching-free; versions are **not** stated here and are pinned exactly in th
   hoard and `b` then hit them (18/18 cached); `gc` removed the merged task (database dropped) and
   kept the fresh one; after `down b` no task databases, no port blocks. sqlite and compose
   (Docker 29.9.1) smoke-tested on a scratch repo.
+- M3 dogfood 2026-10-22 (example-app 434277b, berth 0.1.0, git 2.43.0, node 22.22.0, pnpm 12.11.2,
+  turbo 2.11.8, Claude Code 2.1.308): the npm launcher plus `berth-linux-x64` installed from
+  `npm pack` tarballs runs `berth --version` and passes exit codes through. Two Claude Code-shaped
+  `hook worktree-create` calls at once print only the worktree path on stdout (setup output goes to
+  stderr). `hook session-start` writes 13 `export` lines that `bash` sources (`PORT` set) with no
+  copied secret. `hook statusline` prints `<task> :<port>` inside, nothing outside.
+  `hook worktree-remove` restores the worktree list and leaves `ports.json` empty. A real headless
+  `claude -p --worktree` session ran the WorktreeCreate and SessionStart hooks. In `-p` mode it did
+  not call WorktreeRemove on exit, so a `-p` worktree is removed with `berth down` or the hook by hand.
 - Claude Code: `.worktreeinclude` format, worktree-create/remove hook names and payload, and the
   SessionStart env-file mechanism; Codex equivalents if any.
 
@@ -574,7 +596,9 @@ All fetching-free; versions are **not** stated here and are pinned exactly in th
    and port mapping); hoard remote-cache export; turbo cache seeding; `berth gc` (remove `ready`
    tasks whose branch is merged and worktree clean). Done 2026-10-21, plan `2026-10-21-berth-m2.md`.
 3. **M3 — distribution and integration** — release via hoist, npm launcher, Windows; hull renders
-   `berth.toml`, skill, hooks and statusline segment; D-00x in `keelstackhq/decisions`.
+   `berth.toml`, skill, hooks and statusline segment; D-00x in `keelstackhq/decisions`. berth's
+   part done 2026-10-22, plan `2026-10-22-berth-m3.md` (PRs #5, #6, #7); hull's rendering and the
+   decisions row are their repos' work.
 4. **Later, with evidence** — hosted DB branches (network + token; maybe hoist's), cross-agent
    diff view for review, disk quotas.
 

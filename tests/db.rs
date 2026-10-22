@@ -10,6 +10,7 @@ use berth::config::{DbCfg, Provider};
 use berth::db::{
     check_sqlite, check_tools_in, create, default_pg_name, default_project, drop, entry, resolve,
 };
+#[cfg(unix)]
 use berth::manifest::DbEntry;
 use berth::manifest::PortBlock;
 use berth::report::Action;
@@ -151,7 +152,12 @@ fn sqlite_plan() {
     )
     .unwrap();
     assert_eq!(p.name, "data/t.db");
-    assert_eq!(p.url.as_deref(), Some("sqlite:///wt/data/t.db"));
+    // `{db.path}` is a native path; the template decides the rest.
+    let path = Path::new("/wt").join(berth::sys::native("data/t.db"));
+    assert_eq!(
+        p.url.as_deref(),
+        Some(format!("sqlite://{}", path.display()).as_str())
+    );
 }
 
 #[test]
@@ -250,6 +256,8 @@ fn entry_records_postgres_connection_only() {
 const T: Duration = Duration::from_secs(20);
 
 /// Fake tool that logs `cwd: argv` to `<root>/bin/<name>.log`.
+// Unix-only: fake binaries are #!/bin/sh scripts with exec bits
+#[cfg(unix)]
 fn logging(fx: &Fixture, name: &str, extra: &str) {
     let log = fx.bin.join(format!("{name}.log"));
     fx.fake_bin(
@@ -258,18 +266,26 @@ fn logging(fx: &Fixture, name: &str, extra: &str) {
     );
 }
 
+// Unix-only: helper of the fake-binary tests
+#[cfg(unix)]
 fn log_of(fx: &Fixture, name: &str) -> String {
     fs::read_to_string(fx.bin.join(format!("{name}.log"))).unwrap_or_default()
 }
 
+// Unix-only: helper of the fake-binary tests
+#[cfg(unix)]
 fn env_of(fx: &Fixture) -> BTreeMap<String, String> {
     BTreeMap::from([("PATH".to_string(), fx.path_with_bin())])
 }
 
+// Unix-only: helper of the fake-binary tests
+#[cfg(unix)]
 fn pg_plan(c: &DbCfg, repo: &str) -> berth::db::DbPlan {
     resolve(c, repo, Path::new("/main"), "a", Path::new("/wt"), &ports()).unwrap()
 }
 
+// Unix-only: needs Fixture::fake_bin (a #!/bin/sh script with an exec bit)
+#[cfg(unix)]
 #[test]
 fn createdb_argv_with_template() {
     let fx = Fixture::new();
@@ -290,11 +306,13 @@ fn createdb_argv_with_template() {
         "{log}"
     );
     assert!(
-        log.starts_with(fx.tmp.canonicalize().unwrap().to_str().unwrap()),
+        log.starts_with(berth::sys::canonicalize(&fx.tmp).unwrap().to_str().unwrap()),
         "{log}"
     );
 }
 
+// Unix-only: needs Fixture::fake_bin (a #!/bin/sh script with an exec bit)
+#[cfg(unix)]
 #[test]
 fn createdb_with_user_without_template() {
     let fx = Fixture::new();
@@ -312,6 +330,8 @@ fn createdb_with_user_without_template() {
     );
 }
 
+// Unix-only: fake binaries are #!/bin/sh scripts with exec bits
+#[cfg(unix)]
 #[test]
 fn createdb_failure_is_a_hook_error_with_tail() {
     let fx = Fixture::new();
@@ -335,6 +355,8 @@ fn createdb_failure_is_a_hook_error_with_tail() {
     assert_eq!(err.exit_code(), 3);
 }
 
+// Unix-only: needs Fixture::fake_bin (a #!/bin/sh script with an exec bit)
+#[cfg(unix)]
 fn pg_entry(created: bool) -> DbEntry {
     DbEntry {
         provider: "postgres".into(),
@@ -346,6 +368,8 @@ fn pg_entry(created: bool) -> DbEntry {
     }
 }
 
+// Unix-only: needs Fixture::fake_bin (a #!/bin/sh script with an exec bit)
+#[cfg(unix)]
 #[test]
 fn dropdb_argv_and_force() {
     let fx = Fixture::new();
@@ -373,6 +397,8 @@ fn dropdb_argv_and_force() {
     );
 }
 
+// Unix-only: needs Fixture::fake_bin (a #!/bin/sh script with an exec bit)
+#[cfg(unix)]
 #[test]
 fn dropdb_with_user_from_the_entry() {
     let fx = Fixture::new();
@@ -387,6 +413,8 @@ fn dropdb_with_user_from_the_entry() {
     ));
 }
 
+// Unix-only: fake binaries are #!/bin/sh scripts with exec bits
+#[cfg(unix)]
 #[test]
 fn dropdb_skips_a_database_berth_did_not_create() {
     let fx = Fixture::new();
@@ -402,6 +430,8 @@ fn dropdb_skips_a_database_berth_did_not_create() {
     assert_eq!(log_of(&fx, "dropdb"), "");
 }
 
+// Unix-only: needs Fixture::fake_bin (a #!/bin/sh script with an exec bit)
+#[cfg(unix)]
 #[test]
 fn dropdb_failure_is_a_hook_error() {
     let fx = Fixture::new();
@@ -410,6 +440,8 @@ fn dropdb_failure_is_a_hook_error() {
     assert!(err.reason().contains("dropdb"));
 }
 
+// Unix-only: needs Fixture::fake_bin (a #!/bin/sh script with an exec bit)
+#[cfg(unix)]
 #[test]
 fn compose_up_and_down() {
     let fx = Fixture::new();
@@ -425,7 +457,7 @@ fn compose_up_and_down() {
     )
     .unwrap();
     assert_eq!(plan.name, format!("my-app-{}-fix-it", h("/main")));
-    let wt = fx.tmp.canonicalize().unwrap();
+    let wt = berth::sys::canonicalize(&fx.tmp).unwrap();
     let item = create(&fx.repo, &wt, &c, &plan, &env_of(&fx)).unwrap();
     assert_eq!(
         (item.action, item.reason.as_str()),
@@ -466,6 +498,8 @@ fn compose_up_and_down() {
     );
 }
 
+// Unix-only: fake binaries are #!/bin/sh scripts with exec bits
+#[cfg(unix)]
 #[test]
 fn compose_without_services_runs_all() {
     let fx = Fixture::new();
@@ -478,6 +512,8 @@ fn compose_without_services_runs_all() {
     )));
 }
 
+// Unix-only: fake binaries are #!/bin/sh scripts with exec bits
+#[cfg(unix)]
 #[test]
 fn compose_failure_is_a_hook_error() {
     let fx = Fixture::new();
@@ -500,15 +536,18 @@ fn sqlite_fx(c: &DbCfg) -> (Fixture, berth::db::DbPlan, std::path::PathBuf) {
 
 #[test]
 fn sqlite_copies_bytes_and_mode_then_skips() {
-    use std::os::unix::fs::PermissionsExt;
     let c = cfg("provider = \"sqlite\"\ntemplate = \"data/dev.db\"");
     let (fx, plan, wt) = sqlite_fx(&c);
     common::write(&fx.repo, "data/dev.db", "SQLite format 3\0rows");
-    fs::set_permissions(
-        fx.repo.join("data/dev.db"),
-        fs::Permissions::from_mode(0o640),
-    )
-    .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        fs::set_permissions(
+            fx.repo.join("data/dev.db"),
+            fs::Permissions::from_mode(0o640),
+        )
+        .unwrap();
+    }
     let item = create(&fx.repo, &wt, &c, &plan, &BTreeMap::new()).unwrap();
     assert_eq!(
         (item.action, item.key.as_str(), item.reason.as_str()),
@@ -516,10 +555,15 @@ fn sqlite_copies_bytes_and_mode_then_skips() {
     );
     let target = wt.join("data/dev.db");
     assert_eq!(fs::read(&target).unwrap(), b"SQLite format 3\0rows");
-    assert_eq!(
-        fs::metadata(&target).unwrap().permissions().mode() & 0o777,
-        0o640
-    );
+    // Unix-only: Windows has no mode bits.
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        assert_eq!(
+            fs::metadata(&target).unwrap().permissions().mode() & 0o777,
+            0o640
+        );
+    }
     assert_eq!(fs::read_dir(wt.join(".berth/tmp")).unwrap().count(), 0);
     let again = create(&fx.repo, &wt, &c, &plan, &BTreeMap::new()).unwrap();
     assert_eq!(
@@ -528,6 +572,8 @@ fn sqlite_copies_bytes_and_mode_then_skips() {
     );
 }
 
+// Unix-only: creates symlinks, which needs privileges on Windows
+#[cfg(unix)]
 #[test]
 fn sqlite_refuses_target_through_a_symlink() {
     let c = cfg("provider = \"sqlite\"\ntemplate = \"data/dev.db\"");
@@ -569,6 +615,8 @@ fn check_sqlite_missing_template() {
     );
 }
 
+// Unix-only: creates symlinks, which needs privileges on Windows
+#[cfg(unix)]
 #[test]
 fn check_sqlite_symlink_and_directory_template() {
     let c = cfg("provider = \"sqlite\"\ntemplate = \"dev.db\"");
@@ -598,6 +646,8 @@ fn check_sqlite_nonempty_wal() {
     assert!(!msg.contains("pending"));
 }
 
+// Unix-only: fake binaries are #!/bin/sh scripts with exec bits
+#[cfg(unix)]
 #[test]
 fn check_sqlite_unignored_target_is_refused() {
     let c = cfg("provider = \"sqlite\"\ntemplate = \"dev.sqlite3\"");
@@ -615,6 +665,8 @@ fn check_sqlite_unignored_target_is_refused() {
     );
 }
 
+// Unix-only: fake binaries are #!/bin/sh scripts with exec bits
+#[cfg(unix)]
 #[test]
 fn check_sqlite_checks_the_path_key_for_ignore() {
     let c = cfg("provider = \"sqlite\"\ntemplate = \"dev.db\"\npath = \"local.sqlite3\"");
@@ -624,6 +676,8 @@ fn check_sqlite_checks_the_path_key_for_ignore() {
     assert_eq!(item.key, "local.sqlite3");
 }
 
+// Unix-only: fake binaries are #!/bin/sh scripts with exec bits
+#[cfg(unix)]
 #[test]
 fn check_tools_names_the_missing_tool() {
     let fx = Fixture::new();
@@ -650,7 +704,8 @@ fn check_tools_ignores_non_executable_files() {
     fs::write(fx.bin.join("createdb"), "").unwrap();
     fs::write(fx.bin.join("dropdb"), "").unwrap();
     let pg = cfg("provider = \"postgres\"");
-    assert!(check_tools_in(&pg, fx.bin.as_os_str()).is_err());
+    // Unix needs an exec bit; Windows has none, so any file counts (Decision 6).
+    assert_eq!(check_tools_in(&pg, fx.bin.as_os_str()).is_err(), cfg!(unix));
 }
 
 // ---- real PostgreSQL (optional) ----

@@ -1,3 +1,4 @@
+use berth::sys::native;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Command;
@@ -5,7 +6,7 @@ use std::process::Command;
 use berth::cli::Format;
 use berth::config::DbCfg;
 use berth::db::{DbPlan, resolve};
-use berth::env::{EnvInput, build_env, expand, format_env};
+use berth::env::{EnvInput, build_env, expand, format_env, next_command_hint};
 use berth::manifest::PortBlock;
 
 fn block() -> PortBlock {
@@ -36,16 +37,12 @@ fn berth_vars_and_named_ports() {
     assert_eq!(env["PORT"], "21340");
     assert_eq!(env["WEB_PORT"], "21340");
     assert_eq!(env["API_PORT"], "21341");
-    assert_eq!(
-        env["TURBO_CACHE_DIR"],
-        "/r/hull.berth/fix-login/.turbo/cache"
-    );
-    assert_eq!(
-        env["VITE_CACHE_PATH"],
-        "/r/hull.berth/fix-login/node_modules/.vite/task-cache"
-    );
-    assert_eq!(env["CARGO_TARGET_DIR"], "/r/hull.berth/fix-login/target");
-    assert!(env["TMPDIR"].ends_with(".berth/tmp"));
+    // The suffixes berth adds use the OS separator.
+    let wt = |rel: &str| format!("/r/hull.berth/fix-login{}", native(rel));
+    assert_eq!(env["TURBO_CACHE_DIR"], wt("/.turbo/cache"));
+    assert_eq!(env["VITE_CACHE_PATH"], wt("/node_modules/.vite/task-cache"));
+    assert_eq!(env["CARGO_TARGET_DIR"], wt("/target"));
+    assert_eq!(env["TMPDIR"], wt("/.berth/tmp"));
 }
 
 #[test]
@@ -159,6 +156,64 @@ fn fish_and_dotenv_escape() {
 }
 
 #[test]
+fn pwsh_quotes_with_single_quotes_only() {
+    let one = BTreeMap::from([("K".to_string(), "it's".to_string())]);
+    assert_eq!(format_env(&one, Format::Pwsh), "$env:K = 'it''s'\n");
+    // `$`, backtick, double quotes and backslashes are literal inside single quotes; a newline
+    // stays a newline.
+    let two = BTreeMap::from([("K".to_string(), "$HOME `x` \"q\" a\\b\nc".to_string())]);
+    assert_eq!(
+        format_env(&two, Format::Pwsh),
+        "$env:K = '$HOME `x` \"q\" a\\b\nc'\n"
+    );
+    // PowerShell also treats the typographic single quotes as quote characters; double them.
+    let three = BTreeMap::from([(
+        "K".to_string(),
+        "a\u{2018}b\u{2019}c\u{201a}d\u{201b}".to_string(),
+    )]);
+    assert_eq!(
+        format_env(&three, Format::Pwsh),
+        "$env:K = 'a\u{2018}\u{2018}b\u{2019}\u{2019}c\u{201a}\u{201a}d\u{201b}\u{201b}'\n"
+    );
+}
+
+/// Round trip through a real `pwsh`; without one on PATH the test returns early (like the
+/// APFS test in copy.rs).
+#[test]
+fn pwsh_format_round_trips() {
+    if Command::new("pwsh")
+        .args(["-NoProfile", "-Command", "exit 0"])
+        .output()
+        .is_err()
+    {
+        eprintln!("note: pwsh not on PATH; skipping the pwsh round trip");
+        return;
+    }
+    let mut env = sample();
+    env.insert("G".into(), "it\u{2019}s \u{2018}x\u{2019}".into());
+    let out = format_env(&env, Format::Pwsh);
+    let dir = tempfile::tempdir().unwrap();
+    for (k, v) in &env {
+        let script = dir.path().join("t.ps1");
+        std::fs::write(&script, format!("{out}[Console]::Out.Write($env:{k})\n")).unwrap();
+        let got = Command::new("pwsh")
+            .args(["-NoProfile", "-File"])
+            .arg(&script)
+            .env_remove(k)
+            .output()
+            .unwrap();
+        assert!(
+            got.status.success(),
+            "{k}: {}",
+            String::from_utf8_lossy(&got.stderr)
+        );
+        // pwsh may translate `\n` to the platform newline when writing; compare normalized.
+        let text = String::from_utf8(got.stdout).unwrap().replace("\r\n", "\n");
+        assert_eq!(text, *v, "{k}");
+    }
+}
+
+#[test]
 fn json_is_one_sorted_object() {
     let out = format_env(&sample(), Format::Json);
     assert!(out.ends_with('\n'));
@@ -259,7 +314,11 @@ fn env_values_use_db_placeholders() {
         "/w",
     );
     let extra = BTreeMap::from([("P".to_string(), "{db.path}".to_string())]);
-    assert_eq!(env_with(&sq, &extra).unwrap()["P"], "/w/db/dev.sqlite");
+    // Native separators: compared as paths so `\` on Windows matches.
+    assert_eq!(
+        Path::new(&env_with(&sq, &extra).unwrap()["P"]),
+        Path::new("/w/db/dev.sqlite")
+    );
 }
 
 #[test]
@@ -290,5 +349,17 @@ fn db_placeholder_without_db_is_unknown() {
     assert!(
         err.contains("unknown placeholder {db.url} in [env].P"),
         "{err}"
+    );
+}
+
+#[test]
+fn next_command_hint_per_shell() {
+    assert_eq!(
+        next_command_hint("/w/a b", false),
+        "cd '/w/a b' && eval \"$(berth env)\""
+    );
+    assert_eq!(
+        next_command_hint(r"C:\w\it's", true),
+        r"Set-Location -LiteralPath 'C:\w\it''s'; berth env --format pwsh | Out-String | Invoke-Expression"
     );
 }

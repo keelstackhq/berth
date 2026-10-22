@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::process::Output;
 
 fn canon(p: &Path) -> PathBuf {
-    fs::canonicalize(p).expect("canonicalize")
+    berth::sys::canonicalize(p).expect("canonicalize")
 }
 
 fn wt(fx: &Fixture, task: &str) -> PathBuf {
@@ -110,7 +110,7 @@ fn world() -> Fixture {
         "",
         &format!(
             "[teardown]\nrun = ['echo \"$PWD\" >> \"{}\"']",
-            log.display()
+            common::sh_path(&log)
         ),
     );
     for t in ["merged", "squashed", "open", "fresh", "dirty", "broken"] {

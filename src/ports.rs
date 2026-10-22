@@ -31,8 +31,7 @@ pub fn blocks(range: (u16, u16), count: u16) -> Vec<u16> {
 
 /// Index of the block a repo and task prefer, out of `n` blocks.
 pub fn preferred_index(repo: &Path, task: &str, n: usize) -> usize {
-    use std::os::unix::ffi::OsStrExt;
-    let mut key = repo.as_os_str().as_bytes().to_vec();
+    let mut key = repo.as_os_str().as_encoded_bytes().to_vec();
     key.push(0);
     key.extend_from_slice(task.as_bytes());
     (fnv1a64(&key) % n as u64) as usize

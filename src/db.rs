@@ -5,6 +5,7 @@
 use std::collections::BTreeMap;
 use std::ffi::OsStr;
 use std::fs;
+#[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -150,8 +151,14 @@ pub fn resolve(
             let rel = cfg.sqlite_path().ok_or_else(|| {
                 cfg_err("[db].template is required for provider = \"sqlite\"".into())
             })?;
-            let abs = worktree.join(rel);
-            let url = format!("file:{}", abs.display());
+            // Native separators in the path; `/` in the URL, which SQLite takes on every OS.
+            let abs = worktree.join(crate::sys::native(rel));
+            let shown = abs.display().to_string();
+            let url = if cfg!(windows) {
+                format!("file:{}", shown.replace('\\', "/"))
+            } else {
+                format!("file:{shown}")
+            };
             (rel.to_string(), Some(abs), Some(url))
         }
         Provider::Compose => {
@@ -207,8 +214,28 @@ fn io_err(path: &Path, source: std::io::Error) -> BerthError {
     }
 }
 
+/// Unix: a regular file with an exec bit. Windows has no exec bits: any regular file counts
+/// (`PATH` entries there are `.exe`/`.cmd` by construction).
 fn is_executable_file(p: &Path) -> bool {
-    fs::metadata(p).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    #[cfg(unix)]
+    {
+        fs::metadata(p).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
+    }
+    #[cfg(not(unix))]
+    {
+        fs::metadata(p).is_ok_and(|m| m.is_file())
+    }
+}
+
+/// Whether `dir` holds `tool`; on Windows also as `tool.exe`, `.cmd` or `.bat`.
+fn tool_in(dir: &Path, tool: &str) -> bool {
+    if is_executable_file(&dir.join(tool)) {
+        return true;
+    }
+    cfg!(windows)
+        && ["exe", "cmd", "bat"]
+            .iter()
+            .any(|ext| is_executable_file(&dir.join(format!("{tool}.{ext}"))))
 }
 
 /// The external tools the provider needs, searched in the process `PATH`.
@@ -228,7 +255,7 @@ pub fn check_tools_in(cfg: &DbCfg, path: &OsStr) -> Result<(), BerthError> {
         Provider::Sqlite => return Ok(()),
     };
     for tool in tools {
-        let found = std::env::split_paths(path).any(|dir| is_executable_file(&dir.join(tool)));
+        let found = std::env::split_paths(path).any(|dir| tool_in(&dir, tool));
         if !found {
             return Err(BerthError::Env(format!("{tool} not found on PATH; {hint}")));
         }

@@ -13,7 +13,7 @@ const HOARD_CANARY: &str = "BERTH_CANARY_hook_3b9d";
 const ENV_CANARY: &str = "BERTH_CANARY_hook_8e41";
 
 fn canon(p: &Path) -> PathBuf {
-    fs::canonicalize(p).expect("canonicalize")
+    berth::sys::canonicalize(p).expect("canonicalize")
 }
 
 fn wt(fx: &Fixture, task: &str) -> PathBuf {
@@ -558,7 +558,7 @@ fn canaries_never_reach_any_stream_or_the_env_file() {
     }
     let env_text = fs::read_to_string(&file).unwrap();
     assert!(!env_text.contains(HOARD_CANARY) && !env_text.contains(ENV_CANARY));
-    let token = canon(&fx.repo).join(".hoard/token");
+    let token = canon(&fx.repo).join(".hoard").join("token");
     assert!(
         env_text.contains(&format!(
             "export TURBO_TOKEN=\"$(cat '{}')\"",

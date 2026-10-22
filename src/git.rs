@@ -6,7 +6,6 @@ use std::collections::BTreeSet;
 use std::ffi::OsStr;
 use std::fs;
 use std::io::{ErrorKind, Write};
-use std::os::unix::ffi::OsStringExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 
@@ -35,6 +34,26 @@ fn io_err(path: &Path, source: std::io::Error) -> BerthError {
     BerthError::Io {
         path: path.to_path_buf(),
         source,
+    }
+}
+
+/// A path git printed. Unix: the raw bytes. Elsewhere git prints UTF-8; anything else is exit 3.
+fn path_from_git(bytes: &[u8]) -> Result<PathBuf, BerthError> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::ffi::OsStringExt;
+        Ok(PathBuf::from(std::ffi::OsString::from_vec(bytes.to_vec())))
+    }
+    #[cfg(not(unix))]
+    {
+        String::from_utf8(bytes.to_vec())
+            .map(PathBuf::from)
+            .map_err(|_| {
+                BerthError::Env(format!(
+                    "git printed a path that is not valid UTF-8: {}",
+                    String::from_utf8_lossy(bytes)
+                ))
+            })
     }
 }
 
@@ -187,7 +206,7 @@ pub fn discover(dir: &Path) -> Result<Repo, BerthError> {
         return Err(BerthError::Env(message));
     }
     let common_dir = PathBuf::from(text(&common.stdout));
-    let common_dir = fs::canonicalize(&common_dir).map_err(|e| io_err(&common_dir, e))?;
+    let common_dir = crate::sys::canonicalize(&common_dir).map_err(|e| io_err(&common_dir, e))?;
     if text(&run(dir, &["rev-parse", "--is-bare-repository"])?) == "true" {
         return Err(BerthError::Env("berth needs a non-bare repository".into()));
     }
@@ -196,7 +215,7 @@ pub fn discover(dir: &Path) -> Result<Repo, BerthError> {
         .into_iter()
         .next()
         .ok_or_else(|| BerthError::Env("git lists no worktrees for this repository".into()))?;
-    let mut main = fs::canonicalize(&first.path).map_err(|e| io_err(&first.path, e))?;
+    let mut main = crate::sys::canonicalize(&first.path).map_err(|e| io_err(&first.path, e))?;
     if main == common_dir {
         // `--separate-git-dir`: git lists the git dir itself as the main entry.
         main = separate_git_dir_checkout(dir, &common_dir)?;
@@ -224,13 +243,13 @@ fn separate_git_dir_checkout(dir: &Path, common_dir: &Path) -> Result<PathBuf, B
     let git_dir = run(dir, &["rev-parse", "--path-format=absolute", "--git-dir"])
         .ok()
         .map(|b| PathBuf::from(text(&b)))
-        .and_then(|p| fs::canonicalize(p).ok());
+        .and_then(|p| crate::sys::canonicalize(p).ok());
     if git_dir.as_deref() != Some(common_dir) {
         return Err(cannot());
     }
     let top = run(dir, &["rev-parse", "--show-toplevel"]).map_err(|_| cannot())?;
     let top = PathBuf::from(text(&top));
-    fs::canonicalize(&top).map_err(|e| io_err(&top, e))
+    crate::sys::canonicalize(&top).map_err(|e| io_err(&top, e))
 }
 
 pub fn resolve_commit(main: &Path, rev: &str) -> Result<String, BerthError> {
@@ -336,7 +355,7 @@ pub fn worktree_list(main: &Path) -> Result<Vec<WorktreeInfo>, BerthError> {
     for field in raw.split(|b| *b == 0) {
         if let Some(path) = field.strip_prefix(b"worktree ") {
             list.push(WorktreeInfo {
-                path: PathBuf::from(std::ffi::OsString::from_vec(path.to_vec())),
+                path: path_from_git(path)?,
                 head: String::new(),
                 branch: None,
             });

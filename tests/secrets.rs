@@ -72,7 +72,7 @@ fn canary_never_printed() {
     scan_files("after up", true);
     ok(&["up", "a"]);
     ok(&["ls"]);
-    for format in ["sh", "fish", "dotenv", "json"] {
+    for format in ["sh", "fish", "pwsh", "dotenv", "json"] {
         ok(&["env", "a", "--format", format]);
     }
     scan_files("after env", true);
@@ -143,7 +143,7 @@ fn m2_canaries_never_printed() {
     step(&["up", "a"]);
     step(&["-v", "up", "b"]);
     // The secrets really were copied and seeded, so their absence from the output means something.
-    let a = fs::canonicalize(fx.root.path())
+    let a = berth::sys::canonicalize(fx.root.path())
         .unwrap()
         .join("repo.berth/a");
     assert_eq!(
@@ -157,14 +157,17 @@ fn m2_canaries_never_printed() {
     );
     assert!(a.join(".turbo/cache/h1.tar.zst").exists());
     let mut sh_text = String::new();
-    for format in ["sh", "fish", "dotenv", "json"] {
+    for format in ["sh", "fish", "pwsh", "dotenv", "json"] {
         let out = step(&["env", "a", "--format", format]);
-        if format == "sh" || format == "fish" {
+        if matches!(format, "sh" | "fish" | "pwsh") {
             sh_text.push_str(&String::from_utf8_lossy(&out.stdout));
         }
     }
     // The shell formats read the token from its file; they name the path, never the value.
-    assert!(sh_text.contains(".hoard/token"), "{sh_text}");
+    assert!(
+        sh_text.contains(&berth::sys::native(".hoard/token")),
+        "{sh_text}"
+    );
     assert!(sh_text.contains("TURBO_API"), "{sh_text}");
     step(&["ls", "--json"]);
     step(&["doctor", "--json"]);

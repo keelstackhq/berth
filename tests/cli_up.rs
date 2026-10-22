@@ -16,7 +16,7 @@ const BOOM: &str = "[setup]\nrun = [\"printf 'bo%sm\\\\n' o; exit 7\"]";
 const SETUP_OK: &str = "[setup]\nrun = [\"echo ok > .setup-ran\"]";
 
 fn canon(p: &Path) -> PathBuf {
-    fs::canonicalize(p).expect("canonicalize")
+    berth::sys::canonicalize(p).expect("canonicalize")
 }
 
 fn root(fx: &Fixture) -> PathBuf {
@@ -210,7 +210,10 @@ fn up_creates_everything() {
     let exclude = fs::read_to_string(canon(&fx.repo).join(".git/info/exclude")).unwrap();
     assert!(exclude.lines().any(|l| l == "/.berth/"), "{exclude}");
     let text = stdout(&out);
-    let hint = format!("cd '{}' && eval \"$(berth env)\"\n", path.display());
+    let hint = format!(
+        "{}\n",
+        berth::env::next_command_hint(&path.display().to_string(), cfg!(windows))
+    );
     assert!(text.ends_with(&hint), "{text}");
     assert!(text.lines().count() > 2, "table before hint: {text}");
     for s in [stdout(&out), stderr(&out)] {
@@ -225,8 +228,20 @@ fn up_creates_everything() {
     assert_eq!(code(&out), 0, "{}", stderr(&out));
     let text = stdout(&out);
     assert!(!text.contains("BERTH_CANARY_5d1e"));
+    // One snapshot for every OS: Windows paths (JSON-escaped `\\`) are shown with `/`.
+    let slash = |s: String| {
+        if cfg!(windows) {
+            s.replace(r"\\", "/").replace('\\', "/")
+        } else {
+            s
+        }
+    };
+    let text = slash(text);
     let mut settings = insta::Settings::clone_current();
-    settings.add_filter(&regex_escape(&root(&fx).display().to_string()), "[ROOT]");
+    settings.add_filter(
+        &regex_escape(&slash(root(&fx).display().to_string())),
+        "[ROOT]",
+    );
     settings.add_filter(r#""pid": \d+"#, r#""pid": "[PID]""#);
     settings.add_filter(r#""host": "[^"]*""#, r#""host": "[HOST]""#);
     settings.add_filter(r#""secs": [0-9.eE+-]+"#, r#""secs": "[SECS]""#);
@@ -400,7 +415,10 @@ fn spaces_in_repo_path() {
     assert_eq!(code(&out), 0, "{}", stderr(&out));
     let path = root(&fx).join("my repo.berth").join("a");
     assert!(path.join(".setup-ran").is_file());
-    let hint = format!("cd '{}' && eval \"$(berth env)\"\n", path.display());
+    let hint = format!(
+        "{}\n",
+        berth::env::next_command_hint(&path.display().to_string(), cfg!(windows))
+    );
     assert!(stdout(&out).ends_with(&hint), "{}", stdout(&out));
 }
 
@@ -725,6 +743,8 @@ fn worktree_add_failure_releases_ports_and_entry() {
     );
 }
 
+// Unix-only: creating a symlink needs privileges on Windows
+#[cfg(unix)]
 #[test]
 fn keep_on_failure_copy_refusal_records_skipped() {
     let fx = Fixture::new();
