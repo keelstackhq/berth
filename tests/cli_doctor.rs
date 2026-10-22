@@ -330,7 +330,7 @@ fn fake_db_tools(fx: &Fixture) -> PathBuf {
     log
 }
 
-// Unix-only: uses a Unix-only std API
+// Unix-only: helper of the fake-binary tests
 #[cfg(unix)]
 fn pg(fx: &Fixture) {
     fx.config(&fx.repo, "", "[db]\nprovider = \"postgres\"");
@@ -346,7 +346,7 @@ fn no_db_or_cache_config_adds_no_items() {
     assert!(items(&v, "cache").is_empty());
 }
 
-// Unix-only: uses a helper that writes fake #!/bin/sh binaries
+// Unix-only: needs Fixture::fake_bin (a #!/bin/sh script with an exec bit)
 #[cfg(unix)]
 #[test]
 fn db_tools_present_are_ok_and_never_run() {
@@ -426,7 +426,7 @@ fn sqlite_healthy_is_ok() {
     assert!(items(&v, "db").iter().all(|i| i["key"] != "tools"));
 }
 
-// Unix-only: uses a Unix-only std API
+// Unix-only: helper of the fake-binary tests
 #[cfg(unix)]
 #[test]
 fn sqlite_problems_are_drift_not_errors() {
@@ -470,7 +470,7 @@ fn sqlite_problems_are_drift_not_errors() {
     assert!(item["reason"].as_str().unwrap().contains(".gitignore"));
 }
 
-// Unix-only: uses a Unix-only std API
+// Unix-only: helper of the fake-binary tests
 #[cfg(unix)]
 fn set_created(fx: &Fixture, created: bool) {
     let path = fx.repo.join(".agents/worktrees.json");
@@ -479,7 +479,7 @@ fn set_created(fx: &Fixture, created: bool) {
     fs::write(&path, serde_json::to_vec_pretty(&v).unwrap()).unwrap();
 }
 
-// Unix-only: uses a helper that writes fake #!/bin/sh binaries
+// Unix-only: needs Fixture::fake_bin (a #!/bin/sh script with an exec bit)
 #[cfg(unix)]
 #[test]
 fn postgres_entry_not_recorded_as_created_is_drift() {

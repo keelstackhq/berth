@@ -261,25 +261,25 @@ fn logging(fx: &Fixture, name: &str, extra: &str) {
     );
 }
 
-// Unix-only: uses a Unix-only std API
+// Unix-only: helper of the fake-binary tests
 #[cfg(unix)]
 fn log_of(fx: &Fixture, name: &str) -> String {
     fs::read_to_string(fx.bin.join(format!("{name}.log"))).unwrap_or_default()
 }
 
-// Unix-only: uses a Unix-only std API
+// Unix-only: helper of the fake-binary tests
 #[cfg(unix)]
 fn env_of(fx: &Fixture) -> BTreeMap<String, String> {
     BTreeMap::from([("PATH".to_string(), fx.path_with_bin())])
 }
 
-// Unix-only: uses a Unix-only std API
+// Unix-only: helper of the fake-binary tests
 #[cfg(unix)]
 fn pg_plan(c: &DbCfg, repo: &str) -> berth::db::DbPlan {
     resolve(c, repo, Path::new("/main"), "a", Path::new("/wt"), &ports()).unwrap()
 }
 
-// Unix-only: uses a helper that writes fake #!/bin/sh binaries
+// Unix-only: needs Fixture::fake_bin (a #!/bin/sh script with an exec bit)
 #[cfg(unix)]
 #[test]
 fn createdb_argv_with_template() {
@@ -306,7 +306,7 @@ fn createdb_argv_with_template() {
     );
 }
 
-// Unix-only: uses a helper that writes fake #!/bin/sh binaries
+// Unix-only: needs Fixture::fake_bin (a #!/bin/sh script with an exec bit)
 #[cfg(unix)]
 #[test]
 fn createdb_with_user_without_template() {
@@ -350,7 +350,7 @@ fn createdb_failure_is_a_hook_error_with_tail() {
     assert_eq!(err.exit_code(), 3);
 }
 
-// Unix-only: uses a helper that writes fake #!/bin/sh binaries
+// Unix-only: needs Fixture::fake_bin (a #!/bin/sh script with an exec bit)
 #[cfg(unix)]
 fn pg_entry(created: bool) -> DbEntry {
     DbEntry {
@@ -363,7 +363,7 @@ fn pg_entry(created: bool) -> DbEntry {
     }
 }
 
-// Unix-only: uses a helper that writes fake #!/bin/sh binaries
+// Unix-only: needs Fixture::fake_bin (a #!/bin/sh script with an exec bit)
 #[cfg(unix)]
 #[test]
 fn dropdb_argv_and_force() {
@@ -392,7 +392,7 @@ fn dropdb_argv_and_force() {
     );
 }
 
-// Unix-only: uses a helper that writes fake #!/bin/sh binaries
+// Unix-only: needs Fixture::fake_bin (a #!/bin/sh script with an exec bit)
 #[cfg(unix)]
 #[test]
 fn dropdb_with_user_from_the_entry() {
@@ -425,7 +425,7 @@ fn dropdb_skips_a_database_berth_did_not_create() {
     assert_eq!(log_of(&fx, "dropdb"), "");
 }
 
-// Unix-only: uses a helper that writes fake #!/bin/sh binaries
+// Unix-only: needs Fixture::fake_bin (a #!/bin/sh script with an exec bit)
 #[cfg(unix)]
 #[test]
 fn dropdb_failure_is_a_hook_error() {
@@ -435,7 +435,7 @@ fn dropdb_failure_is_a_hook_error() {
     assert!(err.reason().contains("dropdb"));
 }
 
-// Unix-only: uses a helper that writes fake #!/bin/sh binaries
+// Unix-only: needs Fixture::fake_bin (a #!/bin/sh script with an exec bit)
 #[cfg(unix)]
 #[test]
 fn compose_up_and_down() {
@@ -567,7 +567,7 @@ fn sqlite_copies_bytes_and_mode_then_skips() {
     );
 }
 
-// Unix-only: needs symlink creation or Unix-only std APIs
+// Unix-only: creates symlinks, which needs privileges on Windows
 #[cfg(unix)]
 #[test]
 fn sqlite_refuses_target_through_a_symlink() {
@@ -610,7 +610,7 @@ fn check_sqlite_missing_template() {
     );
 }
 
-// Unix-only: needs symlink creation or Unix-only std APIs
+// Unix-only: creates symlinks, which needs privileges on Windows
 #[cfg(unix)]
 #[test]
 fn check_sqlite_symlink_and_directory_template() {

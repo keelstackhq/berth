@@ -116,7 +116,7 @@ fn glob_matches_one_level() {
     assert!(p.refused.is_empty());
 }
 
-// Unix-only: needs symlink creation or Unix-only std APIs
+// Unix-only: creates symlinks, which needs privileges on Windows
 #[cfg(unix)]
 #[test]
 fn symlink_and_oversize_refused() {
@@ -137,7 +137,7 @@ fn symlink_and_oversize_refused() {
     );
 }
 
-// Unix-only: needs symlink creation or Unix-only std APIs
+// Unix-only: creates symlinks, which needs privileges on Windows
 #[cfg(unix)]
 #[test]
 fn target_symlink_parent_refused() {
@@ -231,7 +231,7 @@ fn canary_never_appears_in_items() {
     assert!(!shown.contains(canary), "{shown}");
 }
 
-// Unix-only: needs symlink creation or Unix-only std APIs
+// Unix-only: creates symlinks, which needs privileges on Windows
 #[cfg(unix)]
 #[test]
 fn symlinked_staging_dir_refused() {
@@ -256,7 +256,7 @@ fn symlinked_staging_dir_refused() {
     assert!(!wt.join(".env").exists());
 }
 
-// Unix-only: needs symlink creation or Unix-only std APIs
+// Unix-only: creates symlinks, which needs privileges on Windows
 #[cfg(unix)]
 #[test]
 fn source_changed_after_plan_refused() {
