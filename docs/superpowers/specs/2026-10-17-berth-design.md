@@ -56,6 +56,7 @@ berth ls [--json]
 berth env [<task>] [--format sh|fish|dotenv|json]   task defaults to the worktree of the cwd
 berth gc [--dry-run] [--delete-branch] [--json]
 berth doctor [--json]
+berth hook worktree-create|worktree-remove|session-start|statusline   JSON payload on stdin
 ```
 
 Global flags: `-C <dir>`, `--json`, `--no-color`, `-v`. `<task>` is a slug
@@ -85,6 +86,28 @@ Human output: a short table plus the next command (`cd ../hull.berth/fix-login &
 "worktrees": [ <manifest entry, §6> ] }`. Actions: `create`, `ok`, `remove`, `drift`, `refused`,
 `skipped`. `up` and `env` return one entry in `worktrees`; `ls` returns all. Copied file contents
 never appear in either stream (§8).
+
+### `berth hook` (Claude Code)
+
+`berth hook <event>` reads one Claude Code hook payload (a JSON object; unknown fields ignored) on
+stdin and writes what the harness expects. It builds no Report: stdout belongs to the harness's
+protocol, so `--json` is a usage error (exit 2), as are malformed JSON and a missing required
+field (message on stderr). `-C` is ignored; the directory comes from the payload.
+- `worktree-create` (`cwd`, `name`): `berth -C <cwd> up <name>` with default flags. stdout is the
+  absolute worktree path (no `.`/`..` segments) and a newline, nothing else; the table, logs and
+  setup output go to stderr. Exit codes as `up`; an invalid `name` is exit 2.
+- `worktree-remove` (`worktree_path`, optional `cwd`): finds the repo from the worktree (from
+  `cwd` when the directory is gone), the manifest entry whose `path` is `worktree_path`
+  (compared canonicalized), and runs `down <task>` without `--force` and without
+  `--delete-branch`. A refusal (dirty worktree) exits 1 with the reason on stderr and the
+  worktree stays. No entry: note on stderr, exit 0.
+- `session-start` (`cwd`): when `cwd` is inside a berth worktree and `CLAUDE_ENV_FILE` is set,
+  appends `# berth <task>` and the `berth env --format sh` output to that file (created if
+  missing, never truncated). Otherwise it does nothing. Exit 0, or 3 when the file cannot be
+  written. Nothing on stdout. The hoard token stays a `$(cat <file>)` substitution (§7).
+- `statusline` (`workspace.current_dir`, else `cwd`): inside a berth worktree prints one line
+  `<task> :<PORT>`, otherwise nothing. Always exit 0, even on bad input; takes no lock and writes
+  nothing.
 
 ### Idempotency
 
@@ -424,6 +447,14 @@ writes no file and never connects to a database or runs `createdb`, `dropdb` or 
   Code's at plan time), a PreToolUse deny for `[copy]` paths, a statusline segment
   (task + `WEB_PORT`) read from the manifest, and one line in the generated `CLAUDE.md`. If a
   harness offers worktree-create/remove hooks, hull wires them to `berth up --json`/`down`.
+  M3 ships the Claude Code side in berth itself (§3 `berth hook`; `skills/berth/SKILL.md`,
+  `docs/integration.md`): `WorktreeCreate` → `berth hook worktree-create` (replaces Claude
+  Code's own `git worktree` step for `claude --worktree`, `EnterWorktree`, subagent
+  `isolation: "worktree"`; `.worktreeinclude` is then not processed by Claude Code, so berth's
+  `[copy]`/`.worktreeinclude` fallback copies), `WorktreeRemove` → `berth hook worktree-remove`
+  (Claude Code never deletes branches, nor does berth here), `SessionStart` → `berth hook
+  session-start` (appends to `CLAUDE_ENV_FILE`), `statusLine` → `berth hook statusline`. hull
+  renders these files in its own plan.
 - **logbook** joins agent spend to `task`, `branch` and `path` from the manifest.
 - **hoist** releases berth (M3). **decisions**: D-00x for berth after dogfood.
 
