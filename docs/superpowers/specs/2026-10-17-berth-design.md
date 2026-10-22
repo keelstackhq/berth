@@ -232,7 +232,8 @@ Per user (ports are machine-wide): `$BERTH_STATE_DIR`, else `$XDG_STATE_HOME/ber
 - Caches, all inside the worktree (removed with it): `TURBO_CACHE_DIR=<wt>/.turbo/cache`,
   `VITE_CACHE_PATH=<wt>/node_modules/.vite/task-cache` (the variable hoard reads; confirm Vite+
   honours it at plan time), `CARGO_TARGET_DIR=<wt>/target` (a shared target dir serialises
-  builds on cargo's lock), `TMPDIR=<wt>/.berth/tmp`.
+  builds on cargo's lock), `TMPDIR=<wt>/.berth/tmp`. Paths use the OS separator (`\` on
+  Windows, also in `{db.path}` and the hoard token path); the sqlite `file:` URL uses `/`.
 - `[env]` values with placeholders `{repo}`, `{task}`, `{task_snake}`, `{port.<name>}`,
   `{port.base}`, `{worktree}`; with `[db]` also `{db.url}` (when a URL exists), `{db.name}`
   (postgres, compose) and `{db.path}` (sqlite). Unknown placeholder → exit 3.
@@ -573,6 +574,15 @@ All fetching-free; versions are **not** stated here and are pinned exactly in th
   hoard and `b` then hit them (18/18 cached); `gc` removed the merged task (database dropped) and
   kept the fresh one; after `down b` no task databases, no port blocks. sqlite and compose
   (Docker 29.9.1) smoke-tested on a scratch repo.
+- M3 dogfood 2026-10-22 (example-app 434277b, berth 0.1.0, git 2.43.0, node 22.22.0, pnpm 12.11.2,
+  turbo 2.11.8, Claude Code 2.1.308): the npm launcher plus `berth-linux-x64` installed from
+  `npm pack` tarballs runs `berth --version` and passes exit codes through. Two Claude Code-shaped
+  `hook worktree-create` calls at once print only the worktree path on stdout (setup output goes to
+  stderr). `hook session-start` writes 13 `export` lines that `bash` sources (`PORT` set) with no
+  copied secret. `hook statusline` prints `<task> :<port>` inside, nothing outside.
+  `hook worktree-remove` restores the worktree list and leaves `ports.json` empty. A real headless
+  `claude -p --worktree` session ran the WorktreeCreate and SessionStart hooks. In `-p` mode it did
+  not call WorktreeRemove on exit, so a `-p` worktree is removed with `berth down` or the hook by hand.
 - Claude Code: `.worktreeinclude` format, worktree-create/remove hook names and payload, and the
   SessionStart env-file mechanism; Codex equivalents if any.
 
@@ -586,7 +596,9 @@ All fetching-free; versions are **not** stated here and are pinned exactly in th
    and port mapping); hoard remote-cache export; turbo cache seeding; `berth gc` (remove `ready`
    tasks whose branch is merged and worktree clean). Done 2026-10-21, plan `2026-10-21-berth-m2.md`.
 3. **M3 — distribution and integration** — release via hoist, npm launcher, Windows; hull renders
-   `berth.toml`, skill, hooks and statusline segment; D-00x in `keelstackhq/decisions`.
+   `berth.toml`, skill, hooks and statusline segment; D-00x in `keelstackhq/decisions`. berth's
+   part done 2026-10-22, plan `2026-10-22-berth-m3.md` (PRs #5, #6, #7); hull's rendering and the
+   decisions row are their repos' work.
 4. **Later, with evidence** — hosted DB branches (network + token; maybe hoist's), cross-agent
    diff view for review, disk quotas.
 

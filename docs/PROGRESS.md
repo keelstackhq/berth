@@ -2,7 +2,7 @@
 
 ## Status
 
-Milestone 3 (distribution and integration), plan `docs/superpowers/plans/2026-10-22-berth-m3.md`: Task 1 done; Track B (release, PR #5) and Track C Tasks 9-10 (PR #6) merged; Track A (Windows, Tasks 2-4) on `claude/berth-m3-windows` (PR #7, Windows CI leg not yet green); Task 11 (dogfood) in progress.
+Milestone 3 (distribution and integration), plan `docs/superpowers/plans/2026-10-22-berth-m3.md`: Tasks 1-11 done. Track B (release, PR #5) and Track C Tasks 9-10 (PR #6) merged; Track A (Windows, Tasks 2-4) and Task 11 (dogfood) on `claude/berth-m3-windows` (PR #7).
 
 Milestone 1 merged to `main` (PR #1, 2026-10-18; decisions channel in PR #2, 2026-10-21). Milestone 2
 (services) complete, plan `docs/superpowers/plans/2026-10-21-berth-m2.md`: Tasks 1-11 and the
@@ -48,13 +48,17 @@ whole-branch review fixes done; PR #3.
 - 2026-10-22 · M3 Task 4 · `windows-latest` leg in `ci` (`fail-fast: false`, `ci-ok` unchanged); tests/common uses an empty gitconfig file and `core.autocrlf=false`, portable PATH join; Unix-only tests gated `#[cfg(unix)]` with reasons; spec §13/§16 · fmt, clippy (host and `x86_64-pc-windows-gnu --all-targets`), `cargo test --locked` green locally; Windows leg result recorded in the follow-up commits
 - 2026-10-22 · M3 Task 9 · `berth hook worktree-create|worktree-remove|session-start|statusline` (`src/ops/hook.rs`; `main` bypasses the Report; stdout is only the path / nothing / the status line); spec §3, §12 · `cargo test --test cli_hook` 23/23 (setup stdout kept off stdout, refusal 1, bad name 2, `--json` 2, remove clean/dirty/unknown, env file sourced in `sh`, hoard and `.env` canaries absent), fmt, clippy, `cargo test --locked` green
 - 2026-10-22 · M3 Task 10 · `skills/berth/SKILL.md`, `docs/integration.md` (settings.json hooks, statusline via hull's `statusline.sh`, `Read` deny rules, `berth.toml` seed, `CLAUDE.md` line, other harnesses), README "Use with Claude Code" · hook claims checked against the plan's Claude Code facts; fmt, clippy, `cargo test --locked` green
+- 2026-10-22 · M3 Task 4 fixes · first `windows-latest` run (d33cdd2): `sys::canonicalize` drops the `\\?\` verbatim prefix git cannot use (all callers and tests); copy staging fsyncs a writable handle (Windows refused the read-only one); `safe_relative` refuses `\` and `:` on Windows; sqlite `{db.path}` native separators, `file:` URL with `/`; tests escape JSON paths, read lock length via metadata, use drive-absolute state dirs, assert per OS for signal death and exec bits · new `strip_verbatim` and `safe_relative_on` tests seen failing first; second run (aa3c52f): native separators via `sys::native` in `TURBO_CACHE_DIR`/`VITE_CACHE_PATH`/`CARGO_TARGET_DIR`/`TMPDIR`, the hoard dir and `{db.path}`; tests build Windows-shaped expectations (pwsh next-command hint, fish `\\`, `/` in the ls snapshot), `ls` lock test bounded by its 5 s timeout instead of a 1 s wall clock; spec §7 · fmt, clippy (Linux and `x86_64-pc-windows-gnu`), `cargo test --locked` green
+- 2026-10-22 · M3 Task 11 · dogfood on example-app 434277b · launcher: `npm pack` of `npm/berth` + `berth-linux-x64` (release binary), `npm install -g` into a temp prefix, `berth --version` = `berth 0.1.0`, exit 2 passes through; `hook worktree-create` for `a`/`b` at once exit 0, 12.1 s wall (with `pnpm install`), stdout exactly the path, ports 24090-24099 and 27760-27769; turbo `lint format:check typecheck test build` in both at once 21/21 (`b` once hit a flaky api `logging.test.ts` requestId assertion, rerun green; `pnpm run ci` is `--affected` and ran 0 tasks); `hook session-start` 13 `export` lines, `bash` sources `PORT=24090`, fake `.env` secret absent from every file and stream; `hook statusline` `a :24090` inside, empty outside; `hook worktree-remove` both exit 0, worktree list as before, `ports.json` `"blocks": []`; real `claude -p --worktree` (Claude Code 2.1.308) ran WorktreeCreate + SessionStart (agent saw `PORT=23290`), `-p` never calls WorktreeRemove (removed by hand); spec §17, §18. Container note: pnpm 12's self-installed copy needed its `install.js` again
 - 2026-10-22 · splice update bot · `.github/workflows/splice.yml` (weekly + `workflow_dispatch`, `keelstackhq/splice/action@v1`, scope all) keeps the decisions channel fresh (D-004)
 
 ## Blocked
 
 - **Branch protection.** Protect `main` and require the `ci-ok` status check.
-- **Release (owner, in this order; details in `docs/releasing.md`).** Merging publishes nothing
-  until step 4.
+- **Release (owner, in this order; details in `docs/releasing.md`).** `BERTH_RELEASE` is
+  `enabled` since 2026-10-22: the run on f9b2b61 (PR #5 merge) built 4 of 5 targets, Windows failed
+  to compile before the Windows port, so `publish` was skipped and nothing is tagged or published.
+  The first push to `main` after PR #7 releases `v0.1.0` if steps 1-3 and 5-6 are done.
   1. Publish `@keelstackhq/hoist@0.1.0` on npm (prerequisite; the workflow installs exactly that).
   2. Create the GitHub environment `release` (branch policy `main`, required reviewers), or run
      `hoist apply --area release`.
@@ -65,3 +69,7 @@ whole-branch review fixes done; PR #3.
   6. crates.io trusted publisher for `keel-berth` (repo `keelstackhq/berth`, workflow
      `release.yml`, environment `release`).
   7. Re-run the failed `publish` job.
+- **hull plan.** hull renders berth's `berth.toml` seed, skill, hooks and statusline segment
+  (`docs/integration.md`); that is hull's own milestone, not started here.
+- **Decisions row.** Propose in keelstackhq/decisions: per-task agent workspaces go through
+  `berth`; `.agents/worktrees.json` (version 1) is the read contract for other tools.
