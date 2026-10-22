@@ -97,6 +97,8 @@ fn git_missing_exits_3() {
     assert!(err.contains("git 2.36 or newer is required"), "{err}");
 }
 
+// Unix-only: the fake git is a #!/bin/sh script with an exec bit
+#[cfg(unix)]
 #[test]
 fn old_git_exits_3() {
     use std::os::unix::fs::PermissionsExt;

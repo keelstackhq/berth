@@ -3,9 +3,27 @@ mod common;
 use common::{Fixture, git, write};
 use serde_json::Value;
 use std::fs;
-use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 use std::process::Output;
+
+/// Whether `a` and `b` are the same file (hard links). Unix compares inodes; elsewhere an
+/// append through `a` must show up in `b`. The append changes `a`, so call this last.
+fn same_file(a: &Path, b: &Path) -> bool {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        fs::metadata(a).unwrap().ino() == fs::metadata(b).unwrap().ino()
+    }
+    #[cfg(not(unix))]
+    {
+        use std::io::Write;
+        let before = fs::read(b).unwrap();
+        let mut f = fs::OpenOptions::new().append(true).open(a).unwrap();
+        f.write_all(b"+").unwrap();
+        drop(f);
+        fs::read(b).unwrap() != before
+    }
+}
 
 fn canon(p: &Path) -> PathBuf {
     fs::canonicalize(p).expect("canonicalize")
@@ -90,9 +108,9 @@ fn link_mode_shares_inodes_and_skips_tmp_and_subdirs() {
         ["h1-meta.json", "h1.tar.zst", "h2.tar.zst"]
     );
     for name in ["h1.tar.zst", "h1-meta.json", "h2.tar.zst"] {
-        let a = fs::metadata(fx.repo.join(".turbo/cache").join(name)).unwrap();
-        let b = fs::metadata(seeded_dir.join(name)).unwrap();
-        assert_eq!(a.ino(), b.ino(), "{name} should be hard linked");
+        let a = fx.repo.join(".turbo/cache").join(name);
+        let b = seeded_dir.join(name);
+        assert!(same_file(&a, &b), "{name} should be hard linked");
     }
 }
 
@@ -130,11 +148,8 @@ fn copy_mode_copies_bytes_with_new_inodes() {
     for name in ["h1.tar.zst", "h1-meta.json", "h2.tar.zst"] {
         let src = fx.repo.join(".turbo/cache").join(name);
         let dst = seeded_dir.join(name);
-        assert_ne!(
-            fs::metadata(&src).unwrap().ino(),
-            fs::metadata(&dst).unwrap().ino()
-        );
         assert_eq!(fs::read(&src).unwrap(), fs::read(&dst).unwrap());
+        assert!(!same_file(&src, &dst), "{name} should be a copy");
     }
 }
 

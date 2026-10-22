@@ -4,11 +4,17 @@ use common::{Fixture, write};
 use serde_json::Value;
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Output, Stdio};
+use std::process::Output;
+// The fake-binary tests (and their helpers) are Unix-only; see `Fixture::fake_bin`.
+#[cfg(unix)]
+use std::process::{Child, Stdio};
+#[cfg(unix)]
 use std::time::{Duration, Instant};
 
+#[cfg(unix)]
 const PG: &str = "[db]\nprovider = \"postgres\"\n";
 const SETUP_URL: &str = "[setup]\nrun = [\"echo \\\"$DATABASE_URL\\\" > .db-url\"]";
+#[cfg(unix)]
 const SETUP_FAIL: &str = "[setup]\nrun = [\"exit 7\"]";
 
 fn canon(p: &Path) -> PathBuf {
@@ -65,20 +71,28 @@ fn reg_blocks(fx: &Fixture) -> usize {
     }
 }
 
+// Unix-only: uses a Unix-only std API
+#[cfg(unix)]
 fn log_path(fx: &Fixture, tool: &str) -> PathBuf {
     fx.root.path().join(format!("{tool}.log"))
 }
 
+// Unix-only: uses a Unix-only std API
+#[cfg(unix)]
 fn log(fx: &Fixture, tool: &str) -> String {
     fs::read_to_string(log_path(fx, tool)).unwrap_or_default()
 }
 
+// Unix-only: uses a Unix-only std API
+#[cfg(unix)]
 fn fail_flag(fx: &Fixture, tool: &str) -> PathBuf {
     fx.root.path().join(format!("{tool}.fail"))
 }
 
 /// Fake `tool`: appends its arguments to `<root>/<tool>.log`; exits 1 while `<root>/<tool>.fail`
 /// exists.
+// Unix-only: fake binaries are #!/bin/sh scripts with exec bits
+#[cfg(unix)]
 fn fake(fx: &Fixture, tool: &str) {
     let script = format!(
         "echo \"$*\" >> '{log}'\nif [ -e '{flag}' ]; then echo 'boom from {tool}' >&2; exit 1; fi",
@@ -88,6 +102,8 @@ fn fake(fx: &Fixture, tool: &str) {
     fx.fake_bin(tool, &script);
 }
 
+// Unix-only: uses a helper that writes fake #!/bin/sh binaries
+#[cfg(unix)]
 fn pg_fixture(rest: &str) -> Fixture {
     let fx = Fixture::new();
     fake(&fx, "createdb");
@@ -97,6 +113,8 @@ fn pg_fixture(rest: &str) -> Fixture {
     fx
 }
 
+// Unix-only: uses a Unix-only std API
+#[cfg(unix)]
 fn wait_for(path: &Path) {
     let deadline = Instant::now() + Duration::from_secs(10);
     while !path.exists() {
@@ -105,6 +123,8 @@ fn wait_for(path: &Path) {
     }
 }
 
+// Unix-only: uses a Unix-only std API
+#[cfg(unix)]
 fn spawn_paused(fx: &Fixture, step: &str, task: &str) -> Child {
     let child = fx
         .berth_std()
@@ -119,6 +139,8 @@ fn spawn_paused(fx: &Fixture, step: &str, task: &str) -> Child {
     child
 }
 
+// Unix-only: uses a Unix-only std API
+#[cfg(unix)]
 fn regex_escape(s: &str) -> String {
     let mut out = String::new();
     for c in s.chars() {
@@ -130,6 +152,8 @@ fn regex_escape(s: &str) -> String {
     out
 }
 
+// Unix-only: uses a helper that writes fake #!/bin/sh binaries
+#[cfg(unix)]
 #[test]
 fn postgres_up_ok_down_roundtrip() {
     let fx = pg_fixture(SETUP_URL);
@@ -198,6 +222,8 @@ fn postgres_up_ok_down_roundtrip() {
     assert!(entries(&fx).is_empty());
 }
 
+// Unix-only: uses a helper that writes fake #!/bin/sh binaries
+#[cfg(unix)]
 #[test]
 fn createdb_failure_rolls_back_without_dropping() {
     let fx = pg_fixture("");
@@ -219,6 +245,8 @@ fn createdb_failure_rolls_back_without_dropping() {
     );
 }
 
+// Unix-only: uses a helper that writes fake #!/bin/sh binaries
+#[cfg(unix)]
 #[test]
 fn setup_failure_drops_the_database() {
     let fx = pg_fixture(SETUP_FAIL);
@@ -234,6 +262,8 @@ fn setup_failure_drops_the_database() {
     assert_eq!(reg_blocks(&fx), 0);
 }
 
+// Unix-only: uses a helper that writes fake #!/bin/sh binaries
+#[cfg(unix)]
 #[test]
 fn keep_on_failure_keeps_database_and_down_drops_it() {
     let fx = pg_fixture(SETUP_FAIL);
@@ -249,6 +279,8 @@ fn keep_on_failure_keeps_database_and_down_drops_it() {
     assert!(entries(&fx).is_empty());
 }
 
+// Unix-only: uses a helper that writes fake #!/bin/sh binaries
+#[cfg(unix)]
 #[test]
 fn dropdb_failure_keeps_entry_removing() {
     let fx = pg_fixture("");
@@ -271,6 +303,8 @@ fn dropdb_failure_keeps_entry_removing() {
     assert!(entries(&fx).is_empty());
 }
 
+// Unix-only: uses a helper that writes fake #!/bin/sh binaries
+#[cfg(unix)]
 #[test]
 fn down_force_with_failing_dropdb_warns() {
     let fx = pg_fixture("");
@@ -288,6 +322,8 @@ fn down_force_with_failing_dropdb_warns() {
     assert!(stderr(&out).contains("warning:"), "{}", stderr(&out));
 }
 
+// Unix-only: uses a helper that writes fake #!/bin/sh binaries
+#[cfg(unix)]
 #[test]
 fn crash_after_createdb_never_drops_on_down() {
     let fx = pg_fixture("");
@@ -309,6 +345,8 @@ fn crash_after_createdb_never_drops_on_down() {
     assert_eq!(reg_blocks(&fx), 0);
 }
 
+// Unix-only: uses a helper that writes fake #!/bin/sh binaries
+#[cfg(unix)]
 #[test]
 fn renamed_db_is_drift_and_down_drops_the_recorded_name() {
     let fx = pg_fixture("");
@@ -334,6 +372,8 @@ fn renamed_db_is_drift_and_down_drops_the_recorded_name() {
     );
 }
 
+// Unix-only: uses a helper that writes fake #!/bin/sh binaries
+#[cfg(unix)]
 #[test]
 fn db_added_after_up_is_drift() {
     let fx = Fixture::new();
@@ -347,6 +387,8 @@ fn db_added_after_up_is_drift() {
     assert_eq!(log(&fx, "createdb"), "");
 }
 
+// Unix-only: fake binaries are #!/bin/sh scripts with exec bits
+#[cfg(unix)]
 #[test]
 fn missing_createdb_exits_3_before_any_lock() {
     let fx = Fixture::new();
@@ -368,6 +410,8 @@ fn missing_createdb_exits_3_before_any_lock() {
     assert!(entries(&fx).is_empty());
 }
 
+// Unix-only: uses a helper that writes fake #!/bin/sh binaries
+#[cfg(unix)]
 #[test]
 fn invalid_db_name_exits_3_before_any_lock() {
     let fx = pg_fixture("name = \"Bad-Name\"");
@@ -443,6 +487,8 @@ fn sqlite_unignored_target_is_refused() {
     assert_eq!(reg_blocks(&fx), 0);
 }
 
+// Unix-only: uses a helper that writes fake #!/bin/sh binaries
+#[cfg(unix)]
 #[test]
 fn sqlite_nonempty_wal_exits_3_before_any_lock() {
     let fx = sqlite_fixture();
@@ -456,6 +502,8 @@ fn sqlite_nonempty_wal_exits_3_before_any_lock() {
     assert_eq!(reg_blocks(&fx), 0);
 }
 
+// Unix-only: uses a helper that writes fake #!/bin/sh binaries
+#[cfg(unix)]
 fn compose_fixture() -> Fixture {
     let fx = Fixture::new();
     fake(&fx, "docker");
@@ -468,6 +516,8 @@ fn compose_fixture() -> Fixture {
     fx
 }
 
+// Unix-only: uses a helper that writes fake #!/bin/sh binaries
+#[cfg(unix)]
 #[test]
 fn compose_up_and_down() {
     let fx = compose_fixture();
@@ -500,6 +550,8 @@ fn compose_up_and_down() {
         )));
 }
 
+// Unix-only: uses a helper that writes fake #!/bin/sh binaries
+#[cfg(unix)]
 #[test]
 fn compose_failure_rolls_back_with_compose_down() {
     let fx = compose_fixture();
@@ -520,6 +572,8 @@ fn compose_failure_rolls_back_with_compose_down() {
     assert_eq!(reg_blocks(&fx), 0);
 }
 
+// Unix-only: uses a helper that writes fake #!/bin/sh binaries
+#[cfg(unix)]
 #[test]
 fn compose_down_after_worktree_deleted_by_hand() {
     let fx = compose_fixture();
@@ -547,6 +601,8 @@ fn up_on_existing_task_ignores_nonempty_wal() {
     assert!(items.iter().all(|i| i["action"] == "ok"), "{items:?}");
 }
 
+// Unix-only: fake binaries are #!/bin/sh scripts with exec bits
+#[cfg(unix)]
 #[test]
 fn up_on_existing_task_ignores_missing_createdb() {
     let fx = pg_fixture("");
@@ -563,6 +619,8 @@ fn up_on_existing_task_ignores_missing_createdb() {
     assert!(items.iter().all(|i| i["action"] == "ok"), "{items:?}");
 }
 
+// Unix-only: uses a helper that writes fake #!/bin/sh binaries
+#[cfg(unix)]
 #[test]
 fn createdb_failure_prints_a_recovery_hint() {
     let fx = pg_fixture("");
@@ -579,6 +637,8 @@ fn createdb_failure_prints_a_recovery_hint() {
     );
 }
 
+// Unix-only: uses a helper that writes fake #!/bin/sh binaries
+#[cfg(unix)]
 #[test]
 fn down_skip_reason_names_the_dropdb_recovery() {
     let fx = pg_fixture("");

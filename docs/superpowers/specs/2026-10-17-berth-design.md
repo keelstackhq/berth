@@ -440,8 +440,11 @@ writes no file and never connects to a database or runs `createdb`, `dropdb` or 
 
 - **Hermetic by rule.** Tests never touch the user's repos, real ports outside the test range, the
   network or `~`: `tests/common::berth()` sets `BERTH_STATE_DIR` and `HOME` to a temp dir,
-  `GIT_CONFIG_GLOBAL` to an empty file, author env vars, `TMPDIR` to a writable dir, and a test
+  `GIT_CONFIG_GLOBAL` to an empty file (not `/dev/null`, which Windows git does not know), `core.autocrlf=false`, author env vars, `TMPDIR` to a writable dir, and a test
   port range unique per test process. No network or TLS crates exist in the dependency tree.
+- **Windows.** The full suite runs on `windows-latest`. Tests needing Unix-only features (symlink
+  creation, exec bits, `#!/bin/sh` fake binaries via `Fixture::fake_bin`, the `onlybin` PATH,
+  signals, process groups) are `#[cfg(unix)]`, each with a one-line reason.
 - **Temp git repos.** Fixtures build repos with `git init` in temp dirs: plain, pnpm-workspace
   shaped, with `.env` ignored, with `.env` tracked (refusal), with an existing branch.
 - **Unit:** config and unknown keys; placeholders; slot hash (frozen vectors); allocation with a
@@ -486,7 +489,7 @@ All fetching-free; versions are **not** stated here and are pinned exactly in th
 
 ## 16. CI and release
 
-- `.github/workflows/ci.yml`: one job, matrix `ubuntu-latest` + `macos-latest`: `cargo fmt --check`,
+- `.github/workflows/ci.yml`: one job, matrix (`fail-fast: false`) `ubuntu-latest` + `macos-latest` + `windows-latest`: `cargo fmt --check`,
   `cargo clippy --all-targets --locked -- -D warnings`, `cargo test` (nextest if installed). Plus a
   `ci-ok` aggregate, the family pattern. No network in tests, so no secrets in CI.
 - Release (M3) through `hoist release`: static musl Linux and macOS binaries on GitHub Releases,

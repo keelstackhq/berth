@@ -725,6 +725,8 @@ fn worktree_add_failure_releases_ports_and_entry() {
     );
 }
 
+// Unix-only: creating a symlink needs privileges on Windows
+#[cfg(unix)]
 #[test]
 fn keep_on_failure_copy_refusal_records_skipped() {
     let fx = Fixture::new();
