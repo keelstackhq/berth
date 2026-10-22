@@ -1,3 +1,4 @@
+use berth::sys::native;
 use std::collections::BTreeMap;
 use std::path::Path;
 use std::process::Command;
@@ -36,16 +37,12 @@ fn berth_vars_and_named_ports() {
     assert_eq!(env["PORT"], "21340");
     assert_eq!(env["WEB_PORT"], "21340");
     assert_eq!(env["API_PORT"], "21341");
-    assert_eq!(
-        env["TURBO_CACHE_DIR"],
-        "/r/hull.berth/fix-login/.turbo/cache"
-    );
-    assert_eq!(
-        env["VITE_CACHE_PATH"],
-        "/r/hull.berth/fix-login/node_modules/.vite/task-cache"
-    );
-    assert_eq!(env["CARGO_TARGET_DIR"], "/r/hull.berth/fix-login/target");
-    assert!(env["TMPDIR"].ends_with(".berth/tmp"));
+    // The suffixes berth adds use the OS separator.
+    let wt = |rel: &str| format!("/r/hull.berth/fix-login{}", native(rel));
+    assert_eq!(env["TURBO_CACHE_DIR"], wt("/.turbo/cache"));
+    assert_eq!(env["VITE_CACHE_PATH"], wt("/node_modules/.vite/task-cache"));
+    assert_eq!(env["CARGO_TARGET_DIR"], wt("/target"));
+    assert_eq!(env["TMPDIR"], wt("/.berth/tmp"));
 }
 
 #[test]

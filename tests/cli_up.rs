@@ -228,8 +228,20 @@ fn up_creates_everything() {
     assert_eq!(code(&out), 0, "{}", stderr(&out));
     let text = stdout(&out);
     assert!(!text.contains("BERTH_CANARY_5d1e"));
+    // One snapshot for every OS: Windows paths (JSON-escaped `\\`) are shown with `/`.
+    let slash = |s: String| {
+        if cfg!(windows) {
+            s.replace(r"\\", "/").replace('\\', "/")
+        } else {
+            s
+        }
+    };
+    let text = slash(text);
     let mut settings = insta::Settings::clone_current();
-    settings.add_filter(&regex_escape(&root(&fx).display().to_string()), "[ROOT]");
+    settings.add_filter(
+        &regex_escape(&slash(root(&fx).display().to_string())),
+        "[ROOT]",
+    );
     settings.add_filter(r#""pid": \d+"#, r#""pid": "[PID]""#);
     settings.add_filter(r#""host": "[^"]*""#, r#""host": "[HOST]""#);
     settings.add_filter(r#""secs": [0-9.eE+-]+"#, r#""secs": "[SECS]""#);
