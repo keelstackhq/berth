@@ -31,7 +31,7 @@ pub fn worktree_path(repo: &Repo, cfg: &Config, task: &str) -> PathBuf {
     normalize(&repo.main.join(root).join(task))
 }
 
-fn normalize(path: &Path) -> PathBuf {
+pub(crate) fn normalize(path: &Path) -> PathBuf {
     let mut out = PathBuf::new();
     for part in path.components() {
         match part {

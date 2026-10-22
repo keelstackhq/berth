@@ -39,6 +39,8 @@ pub enum Command {
     Gc(GcArgs),
     /// Check berth's state against git and the machine
     Doctor,
+    /// Handle a Claude Code hook event (JSON on stdin; see docs/integration.md)
+    Hook(HookArgs),
 }
 
 impl Command {
@@ -50,8 +52,23 @@ impl Command {
             Command::Env(_) => "env",
             Command::Gc(_) => "gc",
             Command::Doctor => "doctor",
+            Command::Hook(_) => "hook",
         }
     }
+}
+
+#[derive(Debug, Args)]
+pub struct HookArgs {
+    pub event: HookEvent,
+}
+
+/// The hook events berth speaks (spec §12).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, ValueEnum)]
+pub enum HookEvent {
+    WorktreeCreate,
+    WorktreeRemove,
+    SessionStart,
+    Statusline,
 }
 
 #[derive(Debug, Args)]
