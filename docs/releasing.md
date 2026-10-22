@@ -38,8 +38,11 @@ Dry run any time: Actions -> release -> Run workflow (on a branch or on `main`).
 
 ## One-time setup (owner, in this order)
 
-1. **hoist 0.1.0 on npm.** `@keelstackhq/hoist@0.1.0` must exist: `publish` and `prepare` install
-   exactly that version (hoist's own first release is a human step in its repo).
+Done for `v0.1.0` (2026-10-22); kept as the record of how the first release was set up.
+
+1. **hoist on npm.** `publish` and `prepare` install exactly `@keelstackhq/hoist@0.2.0`. Use
+   0.2.0 or later: 0.1.0's post-publish npm check waits only about 8 s, so the `v0.1.0` publish
+   job went red although every package was published; 0.2.0 waits up to 5 min.
 2. **GitHub environment `release`** on `keelstackhq/berth`, with a deployment branch/tag policy
    (`main`) and required reviewers. Or let hoist create it: `hoist apply --area release`.
    A missing environment is created unprotected on first use, so do this before step 4.
