@@ -29,6 +29,8 @@ jobs:
       - run: cargo fmt --check
       - run: cargo clippy --all-targets --locked -- -D warnings
       - run: cargo test --locked --no-fail-fast
+      - if: runner.os == 'Linux'
+        run: node --test npm/berth/test/*.test.js
 
   ci-ok:
     needs: ci
