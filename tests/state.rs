@@ -132,19 +132,30 @@ fn atomic_write_leaves_no_temp() {
 
 #[test]
 fn state_dir_precedence() {
+    // Absolute on every OS: `/b` has no drive on Windows.
+    let abs = |p: &str| {
+        if cfg!(windows) {
+            format!("C:{p}")
+        } else {
+            p.to_string()
+        }
+    };
     let all = |k: &str| match k {
-        "BERTH_STATE_DIR" => Some("/b".to_string()),
-        "XDG_STATE_HOME" => Some("/x".to_string()),
-        "HOME" => Some("/h".to_string()),
+        "BERTH_STATE_DIR" => Some(abs("/b")),
+        "XDG_STATE_HOME" => Some(abs("/x")),
+        "HOME" => Some(abs("/h")),
         _ => None,
     };
-    assert_eq!(state_dir_from(all).unwrap(), Path::new("/b"));
+    assert_eq!(state_dir_from(all).unwrap(), Path::new(&abs("/b")));
     let no_berth = |k: &str| if k == "BERTH_STATE_DIR" { None } else { all(k) };
-    assert_eq!(state_dir_from(no_berth).unwrap(), Path::new("/x/berth"));
-    let only_home = |k: &str| (k == "HOME").then(|| "/h".to_string());
+    assert_eq!(
+        state_dir_from(no_berth).unwrap(),
+        Path::new(&abs("/x/berth"))
+    );
+    let only_home = |k: &str| (k == "HOME").then(|| abs("/h"));
     assert_eq!(
         state_dir_from(only_home).unwrap(),
-        Path::new("/h/.local/state/berth")
+        Path::new(&abs("/h/.local/state/berth"))
     );
     assert!(matches!(state_dir_from(|_| None), Err(BerthError::Env(_))));
 }

@@ -206,7 +206,7 @@ pub fn discover(dir: &Path) -> Result<Repo, BerthError> {
         return Err(BerthError::Env(message));
     }
     let common_dir = PathBuf::from(text(&common.stdout));
-    let common_dir = fs::canonicalize(&common_dir).map_err(|e| io_err(&common_dir, e))?;
+    let common_dir = crate::sys::canonicalize(&common_dir).map_err(|e| io_err(&common_dir, e))?;
     if text(&run(dir, &["rev-parse", "--is-bare-repository"])?) == "true" {
         return Err(BerthError::Env("berth needs a non-bare repository".into()));
     }
@@ -215,7 +215,7 @@ pub fn discover(dir: &Path) -> Result<Repo, BerthError> {
         .into_iter()
         .next()
         .ok_or_else(|| BerthError::Env("git lists no worktrees for this repository".into()))?;
-    let mut main = fs::canonicalize(&first.path).map_err(|e| io_err(&first.path, e))?;
+    let mut main = crate::sys::canonicalize(&first.path).map_err(|e| io_err(&first.path, e))?;
     if main == common_dir {
         // `--separate-git-dir`: git lists the git dir itself as the main entry.
         main = separate_git_dir_checkout(dir, &common_dir)?;
@@ -243,13 +243,13 @@ fn separate_git_dir_checkout(dir: &Path, common_dir: &Path) -> Result<PathBuf, B
     let git_dir = run(dir, &["rev-parse", "--path-format=absolute", "--git-dir"])
         .ok()
         .map(|b| PathBuf::from(text(&b)))
-        .and_then(|p| fs::canonicalize(p).ok());
+        .and_then(|p| crate::sys::canonicalize(p).ok());
     if git_dir.as_deref() != Some(common_dir) {
         return Err(cannot());
     }
     let top = run(dir, &["rev-parse", "--show-toplevel"]).map_err(|_| cannot())?;
     let top = PathBuf::from(text(&top));
-    fs::canonicalize(&top).map_err(|e| io_err(&top, e))
+    crate::sys::canonicalize(&top).map_err(|e| io_err(&top, e))
 }
 
 pub fn resolve_commit(main: &Path, rev: &str) -> Result<String, BerthError> {

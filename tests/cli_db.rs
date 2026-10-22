@@ -18,7 +18,7 @@ const SETUP_URL: &str = "[setup]\nrun = [\"echo \\\"$DATABASE_URL\\\" > .db-url\
 const SETUP_FAIL: &str = "[setup]\nrun = [\"exit 7\"]";
 
 fn canon(p: &Path) -> PathBuf {
-    fs::canonicalize(p).expect("canonicalize")
+    berth::sys::canonicalize(p).expect("canonicalize")
 }
 
 fn root(fx: &Fixture) -> PathBuf {

@@ -143,7 +143,7 @@ fn m2_canaries_never_printed() {
     step(&["up", "a"]);
     step(&["-v", "up", "b"]);
     // The secrets really were copied and seeded, so their absence from the output means something.
-    let a = fs::canonicalize(fx.root.path())
+    let a = berth::sys::canonicalize(fx.root.path())
         .unwrap()
         .join("repo.berth/a");
     assert_eq!(

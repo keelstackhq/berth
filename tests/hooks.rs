@@ -161,7 +161,12 @@ fn signal_death_status() {
         Duration::from_secs(10),
     );
     let (_, status, _) = hook_err(res);
-    assert_eq!(status, "killed by signal 9");
+    if cfg!(unix) {
+        assert_eq!(status, "killed by signal 9");
+    } else {
+        // Windows has no signals: the shell's own kill ends it with an exit code.
+        assert!(status.starts_with("exited "), "{status}");
+    }
 }
 
 #[test]

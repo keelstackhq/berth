@@ -16,7 +16,7 @@ const BOOM: &str = "[setup]\nrun = [\"printf 'bo%sm\\\\n' o; exit 7\"]";
 const SETUP_OK: &str = "[setup]\nrun = [\"echo ok > .setup-ran\"]";
 
 fn canon(p: &Path) -> PathBuf {
-    fs::canonicalize(p).expect("canonicalize")
+    berth::sys::canonicalize(p).expect("canonicalize")
 }
 
 fn root(fx: &Fixture) -> PathBuf {

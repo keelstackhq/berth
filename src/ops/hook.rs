@@ -280,7 +280,7 @@ fn canon_lossy(path: &Path) -> PathBuf {
     let mut rest = Vec::new();
     let mut cur = path.as_path();
     loop {
-        if let Ok(real) = std::fs::canonicalize(cur) {
+        if let Ok(real) = crate::sys::canonicalize(cur) {
             return rest.iter().rev().fold(real, |acc, part| acc.join(part));
         }
         match (cur.parent(), cur.file_name()) {

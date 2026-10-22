@@ -1,4 +1,4 @@
-use berth::sys::sh_from_exec_path;
+use berth::sys::{sh_from_exec_path, strip_verbatim};
 
 fn has<'a>(files: &'a [&'a str]) -> impl Fn(&str) -> bool + 'a {
     move |p| files.contains(&p)
@@ -45,4 +45,23 @@ fn own_pid_is_alive_and_other_host_is_assumed_alive() {
     let host = berth::sys::hostname();
     assert!(berth::sys::pid_alive(std::process::id(), &host));
     assert!(berth::sys::pid_alive(1, "some-other-host.invalid"));
+}
+
+#[test]
+fn strip_verbatim_drops_the_win32_prefix_git_cannot_use() {
+    // `fs::canonicalize` on Windows returns `\\?\C:\...`; git turns it into `//?/C:/...` and
+    // fails ("could not create leading directories").
+    assert_eq!(strip_verbatim(r"\\?\C:\Users\a\repo"), r"C:\Users\a\repo");
+    assert_eq!(
+        strip_verbatim(r"\\?\UNC\server\share\x"),
+        r"\\server\share\x"
+    );
+    // Kept as is: not verbatim, or a verbatim path with no plain form.
+    assert_eq!(strip_verbatim(r"C:\Users\a"), r"C:\Users\a");
+    assert_eq!(strip_verbatim("/home/a/repo"), "/home/a/repo");
+    assert_eq!(
+        strip_verbatim(r"\\?\Volume{1b3b1146-4076-11e1-84aa-806e6f6e6963}\x"),
+        r"\\?\Volume{1b3b1146-4076-11e1-84aa-806e6f6e6963}\x"
+    );
+    assert_eq!(strip_verbatim(r"\\?\C:"), r"\\?\C:");
 }

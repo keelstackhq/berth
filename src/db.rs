@@ -151,8 +151,18 @@ pub fn resolve(
             let rel = cfg.sqlite_path().ok_or_else(|| {
                 cfg_err("[db].template is required for provider = \"sqlite\"".into())
             })?;
-            let abs = worktree.join(rel);
-            let url = format!("file:{}", abs.display());
+            // Native separators in the path; `/` in the URL, which SQLite takes on every OS.
+            let abs = if cfg!(windows) {
+                worktree.join(rel.replace('/', "\\"))
+            } else {
+                worktree.join(rel)
+            };
+            let shown = abs.display().to_string();
+            let url = if cfg!(windows) {
+                format!("file:{}", shown.replace('\\', "/"))
+            } else {
+                format!("file:{shown}")
+            };
             (rel.to_string(), Some(abs), Some(url))
         }
         Provider::Compose => {

@@ -7,7 +7,7 @@ use std::fs;
 use std::path::Path;
 
 fn canon(p: &Path) -> std::path::PathBuf {
-    fs::canonicalize(p).unwrap()
+    berth::sys::canonicalize(p).unwrap()
 }
 
 #[test]

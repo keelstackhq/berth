@@ -136,6 +136,34 @@ pub fn kill_tree(pid: u32) {
         .status();
 }
 
+/// `fs::canonicalize` without Windows' verbatim prefix: `\\?\C:\x` becomes `C:\x` and
+/// `\\?\UNC\srv\share` becomes `\\srv\share`, because git cannot use verbatim paths. Unix:
+/// plain `fs::canonicalize`.
+pub fn canonicalize(path: impl AsRef<std::path::Path>) -> std::io::Result<PathBuf> {
+    let real = std::fs::canonicalize(path)?;
+    if cfg!(windows)
+        && let Some(s) = real.to_str()
+    {
+        return Ok(PathBuf::from(strip_verbatim(s)));
+    }
+    Ok(real)
+}
+
+/// The plain form of a verbatim Windows path (see [`canonicalize`]); anything else, and verbatim
+/// paths with no plain form (`\\?\Volume{..}`, a bare drive), unchanged. Pure, any OS.
+pub fn strip_verbatim(path: &str) -> String {
+    if let Some(rest) = path.strip_prefix(r"\\?\UNC\") {
+        return format!(r"\\{rest}");
+    }
+    if let Some(rest) = path.strip_prefix(r"\\?\") {
+        let b = rest.as_bytes();
+        if b.len() >= 3 && b[0].is_ascii_alphabetic() && b[1] == b':' && b[2] == b'\\' {
+            return rest.to_string();
+        }
+    }
+    path.to_string()
+}
+
 /// Where Git for Windows keeps its `sh.exe`, derived from `git --exec-path`. Walks up from the
 /// exec path (`<prefix>\mingw64\libexec\git-core`, also `mingw32` and `clangarm64`) to the first
 /// directory with `bin\sh.exe`, else `usr\bin\sh.exe`. Pure: `exists` answers whether a candidate

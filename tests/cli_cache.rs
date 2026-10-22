@@ -26,7 +26,7 @@ fn same_file(a: &Path, b: &Path) -> bool {
 }
 
 fn canon(p: &Path) -> PathBuf {
-    fs::canonicalize(p).expect("canonicalize")
+    berth::sys::canonicalize(p).expect("canonicalize")
 }
 
 fn wt(fx: &Fixture, task: &str) -> PathBuf {

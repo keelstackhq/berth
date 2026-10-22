@@ -71,7 +71,7 @@ impl Fixture {
 
     /// First 6 hex chars of FNV-1a over the canonical main checkout path (the default-name hash).
     pub fn hash6(&self) -> String {
-        let main = fs::canonicalize(&self.repo).expect("canonicalize repo");
+        let main = berth::sys::canonicalize(&self.repo).expect("canonicalize repo");
         let h = berth::ports::fnv1a64(main.as_os_str().as_encoded_bytes());
         format!("{h:016x}")[..6].to_string()
     }

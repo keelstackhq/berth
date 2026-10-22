@@ -9,7 +9,7 @@ use std::process::{Child, Output, Stdio};
 use std::time::{Duration, Instant};
 
 fn canon(p: &Path) -> PathBuf {
-    fs::canonicalize(p).expect("canonicalize")
+    berth::sys::canonicalize(p).expect("canonicalize")
 }
 
 fn base_dir(fx: &Fixture) -> PathBuf {

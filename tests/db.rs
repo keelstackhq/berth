@@ -301,7 +301,7 @@ fn createdb_argv_with_template() {
         "{log}"
     );
     assert!(
-        log.starts_with(fx.tmp.canonicalize().unwrap().to_str().unwrap()),
+        log.starts_with(berth::sys::canonicalize(&fx.tmp).unwrap().to_str().unwrap()),
         "{log}"
     );
 }
@@ -452,7 +452,7 @@ fn compose_up_and_down() {
     )
     .unwrap();
     assert_eq!(plan.name, format!("my-app-{}-fix-it", h("/main")));
-    let wt = fx.tmp.canonicalize().unwrap();
+    let wt = berth::sys::canonicalize(&fx.tmp).unwrap();
     let item = create(&fx.repo, &wt, &c, &plan, &env_of(&fx)).unwrap();
     assert_eq!(
         (item.action, item.reason.as_str()),
@@ -699,7 +699,8 @@ fn check_tools_ignores_non_executable_files() {
     fs::write(fx.bin.join("createdb"), "").unwrap();
     fs::write(fx.bin.join("dropdb"), "").unwrap();
     let pg = cfg("provider = \"postgres\"");
-    assert!(check_tools_in(&pg, fx.bin.as_os_str()).is_err());
+    // Unix needs an exec bit; Windows has none, so any file counts (Decision 6).
+    assert_eq!(check_tools_in(&pg, fx.bin.as_os_str()).is_err(), cfg!(unix));
 }
 
 // ---- real PostgreSQL (optional) ----

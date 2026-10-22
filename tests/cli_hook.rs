@@ -13,7 +13,7 @@ const HOARD_CANARY: &str = "BERTH_CANARY_hook_3b9d";
 const ENV_CANARY: &str = "BERTH_CANARY_hook_8e41";
 
 fn canon(p: &Path) -> PathBuf {
-    fs::canonicalize(p).expect("canonicalize")
+    berth::sys::canonicalize(p).expect("canonicalize")
 }
 
 fn wt(fx: &Fixture, task: &str) -> PathBuf {

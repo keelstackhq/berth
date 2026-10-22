@@ -28,7 +28,7 @@ fn in_progress(e: &crate::manifest::Entry) -> bool {
 }
 
 fn canon(path: &Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    crate::sys::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
 pub fn doctor(ctx: &Ctx) -> Result<Report, BerthError> {

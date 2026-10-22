@@ -160,10 +160,20 @@ pub(crate) fn copy_one(src: &Path, target: &Path, tmp_dir: &Path) -> Result<bool
     let n = COUNTER.fetch_add(1, Ordering::Relaxed);
     let tmp: PathBuf = tmp_dir.join(format!("copy-{}-{n}", std::process::id()));
     let result = (|| {
-        fs::copy(src, &tmp).map_err(|e| io_err(src, e))?;
-        fs::File::open(&tmp)
-            .and_then(|f| f.sync_all())
+        // Copy through a handle opened for writing: Windows only flushes (`sync_all`) a file
+        // opened with write access. Permissions follow once the bytes are on disk.
+        let mut from = fs::File::open(src).map_err(|e| io_err(src, e))?;
+        let perms = from.metadata().map_err(|e| io_err(src, e))?.permissions();
+        let mut to = fs::OpenOptions::new()
+            .write(true)
+            .create(true)
+            .truncate(true)
+            .open(&tmp)
             .map_err(|e| io_err(&tmp, e))?;
+        std::io::copy(&mut from, &mut to).map_err(|e| io_err(&tmp, e))?;
+        to.sync_all().map_err(|e| io_err(&tmp, e))?;
+        drop(to);
+        fs::set_permissions(&tmp, perms).map_err(|e| io_err(&tmp, e))?;
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent).map_err(|e| io_err(parent, e))?;
         }
@@ -178,8 +188,15 @@ pub(crate) fn copy_one(src: &Path, target: &Path, tmp_dir: &Path) -> Result<bool
 }
 
 pub(crate) fn safe_relative(rel: &str) -> bool {
+    safe_relative_on(rel, cfg!(windows))
+}
+
+/// A `/`-separated path that stays inside its root. On Windows `\` and `:` are refused too
+/// (`C:\x`, `..\x`, `a:stream`); git never reports either in a path there.
+fn safe_relative_on(rel: &str, windows: bool) -> bool {
     !rel.is_empty()
         && !rel.starts_with('/')
+        && !(windows && rel.contains(['\\', ':']))
         && rel.split('/').all(|c| !matches!(c, "" | "." | ".."))
 }
 
@@ -251,4 +268,31 @@ pub fn execute_copy(
         }
     }
     Ok(items)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::safe_relative_on;
+
+    #[test]
+    fn safe_relative_refuses_windows_escapes_only_on_windows() {
+        for ok in [".env", "apps/web/.env.local"] {
+            assert!(
+                safe_relative_on(ok, false) && safe_relative_on(ok, true),
+                "{ok}"
+            );
+        }
+        for bad in ["", "/x", "../x", "a/../../x", "a//b", "./x"] {
+            assert!(
+                !safe_relative_on(bad, false) && !safe_relative_on(bad, true),
+                "{bad}"
+            );
+        }
+        // Absolute, drive-relative, `..\` and alternate-stream forms on Windows; on Unix `\`
+        // and `:` are ordinary file name characters.
+        for win in [r"C:\x", "C:x", r"\x", r"..\x", r"a\..\..\x", "a:stream"] {
+            assert!(!safe_relative_on(win, true), "{win}");
+            assert!(safe_relative_on(win, false), "{win}");
+        }
+    }
 }

@@ -240,12 +240,12 @@ fn refused(items: Vec<Item>, entry: &Entry) -> Report {
 
 /// True when `path` is a linked worktree git knows about (never the main checkout).
 pub(crate) fn is_registered_worktree(main: &Path, path: &Path) -> Result<bool, BerthError> {
-    let want = std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
+    let want = crate::sys::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     if want == main {
         return Ok(false);
     }
     Ok(git::worktree_list(main)?.iter().any(|w| {
-        let have = std::fs::canonicalize(&w.path).unwrap_or_else(|_| w.path.clone());
+        let have = crate::sys::canonicalize(&w.path).unwrap_or_else(|_| w.path.clone());
         have == want
     }))
 }

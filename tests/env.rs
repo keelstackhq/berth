@@ -317,7 +317,11 @@ fn env_values_use_db_placeholders() {
         "/w",
     );
     let extra = BTreeMap::from([("P".to_string(), "{db.path}".to_string())]);
-    assert_eq!(env_with(&sq, &extra).unwrap()["P"], "/w/db/dev.sqlite");
+    // Native separators: compared as paths so `\` on Windows matches.
+    assert_eq!(
+        Path::new(&env_with(&sq, &extra).unwrap()["P"]),
+        Path::new("/w/db/dev.sqlite")
+    );
 }
 
 #[test]

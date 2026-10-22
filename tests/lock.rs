@@ -43,7 +43,8 @@ fn released_on_drop() {
         record.contains(&format!("pid={}", std::process::id())),
         "{record}"
     );
-    assert!(std::fs::read(&path).unwrap().is_empty());
+    // Length via metadata: reading a held lock file is refused on Windows.
+    assert_eq!(std::fs::metadata(&path).unwrap().len(), 0);
     drop(a);
     assert!(std::fs::read(&sidecar).unwrap().is_empty());
     // A zero timeout tries once: success proves the lock was free right away,

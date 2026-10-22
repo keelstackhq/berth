@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::process::Output;
 
 fn canon(p: &Path) -> PathBuf {
-    fs::canonicalize(p).expect("canonicalize")
+    berth::sys::canonicalize(p).expect("canonicalize")
 }
 
 fn wt(fx: &Fixture, task: &str) -> PathBuf {
@@ -121,9 +121,9 @@ fn stale_registry_is_drift() {
     let gone = fx.root.path().join("gone");
     let (lo, _) = fx.range;
     let reg = format!(
-        r#"{{"version":1,"blocks":[{{"start":{lo},"end":{},"repo":"{}","task":"t","created_at":"2026-10-17T00:00:00Z"}}]}}"#,
+        r#"{{"version":1,"blocks":[{{"start":{lo},"end":{},"repo":{},"task":"t","created_at":"2026-10-17T00:00:00Z"}}]}}"#,
         lo + 9,
-        gone.display()
+        serde_json::to_string(&gone).unwrap()
     );
     write(&fx.state, "ports.json", &reg);
     let (code, v) = doctor(&fx);

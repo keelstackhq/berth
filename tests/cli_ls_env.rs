@@ -12,7 +12,7 @@ use std::time::{Duration, Instant};
 const CANARY: &str = "BERTH_CANARY_7c2e";
 
 fn canon(p: &Path) -> PathBuf {
-    fs::canonicalize(p).expect("canonicalize")
+    berth::sys::canonicalize(p).expect("canonicalize")
 }
 
 fn base_dir(fx: &Fixture) -> PathBuf {

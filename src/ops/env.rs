@@ -56,5 +56,5 @@ pub fn env(ctx: &Ctx, args: &EnvArgs) -> Result<Report, BerthError> {
 }
 
 fn canon(path: &std::path::Path) -> PathBuf {
-    std::fs::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+    crate::sys::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
