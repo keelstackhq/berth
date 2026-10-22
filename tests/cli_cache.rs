@@ -242,7 +242,11 @@ fn hoard_fixture(rest: &str) -> Fixture {
 }
 
 fn token_path(fx: &Fixture) -> String {
-    canon(&fx.repo).join(".hoard/token").display().to_string()
+    canon(&fx.repo)
+        .join(".hoard")
+        .join("token")
+        .display()
+        .to_string()
 }
 
 #[test]
@@ -349,7 +353,11 @@ fn env_fish_reads_the_token_file() {
     );
     assert_eq!(
         text.lines().last().unwrap(),
-        format!("set -gx TURBO_TOKEN (cat '{}')", token_path(&fx))
+        // fish doubles `\` inside single quotes (Windows paths).
+        format!(
+            "set -gx TURBO_TOKEN (cat '{}')",
+            token_path(&fx).replace('\\', "\\\\")
+        )
     );
 }
 
@@ -493,7 +501,7 @@ fn hoard_dir_is_relative_to_main() {
         stdout(&out)
     );
     assert!(
-        stdout(&out).contains("state/hoard/token"),
+        stdout(&out).contains(&berth::sys::native("state/hoard/token")),
         "{}",
         stdout(&out)
     );

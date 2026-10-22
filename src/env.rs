@@ -1,5 +1,6 @@
 //! The per-worktree environment (spec §8) and its output formats.
 
+use crate::sys::native;
 use std::collections::BTreeMap;
 use std::path::Path;
 
@@ -35,13 +36,16 @@ pub fn build_env(i: &EnvInput) -> Result<BTreeMap<String, String>, BerthError> {
     for (name, port) in &i.ports.named {
         set(&format!("{}_PORT", name.to_uppercase()), port.to_string());
     }
-    set("TURBO_CACHE_DIR", format!("{wt}/.turbo/cache"));
+    set(
+        "TURBO_CACHE_DIR",
+        format!("{wt}{}", native("/.turbo/cache")),
+    );
     set(
         "VITE_CACHE_PATH",
-        format!("{wt}/node_modules/.vite/task-cache"),
+        format!("{wt}{}", native("/node_modules/.vite/task-cache")),
     );
-    set("CARGO_TARGET_DIR", format!("{wt}/target"));
-    set("TMPDIR", format!("{wt}/.berth/tmp"));
+    set("CARGO_TARGET_DIR", format!("{wt}{}", native("/target")));
+    set("TMPDIR", format!("{wt}{}", native("/.berth/tmp")));
     let placeholders = db_placeholders(i.db);
     if let Some(db) = i.db {
         if let (Some(var), Some(url)) = (&db.env_var, &db.url) {

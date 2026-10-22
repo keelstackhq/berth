@@ -152,11 +152,7 @@ pub fn resolve(
                 cfg_err("[db].template is required for provider = \"sqlite\"".into())
             })?;
             // Native separators in the path; `/` in the URL, which SQLite takes on every OS.
-            let abs = if cfg!(windows) {
-                worktree.join(rel.replace('/', "\\"))
-            } else {
-                worktree.join(rel)
-            };
+            let abs = worktree.join(crate::sys::native(rel));
             let shown = abs.display().to_string();
             let url = if cfg!(windows) {
                 format!("file:{}", shown.replace('\\', "/"))

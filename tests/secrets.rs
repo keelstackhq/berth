@@ -164,7 +164,10 @@ fn m2_canaries_never_printed() {
         }
     }
     // The shell formats read the token from its file; they name the path, never the value.
-    assert!(sh_text.contains(".hoard/token"), "{sh_text}");
+    assert!(
+        sh_text.contains(&berth::sys::native(".hoard/token")),
+        "{sh_text}"
+    );
     assert!(sh_text.contains("TURBO_API"), "{sh_text}");
     step(&["ls", "--json"]);
     step(&["doctor", "--json"]);

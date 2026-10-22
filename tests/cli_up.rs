@@ -210,7 +210,10 @@ fn up_creates_everything() {
     let exclude = fs::read_to_string(canon(&fx.repo).join(".git/info/exclude")).unwrap();
     assert!(exclude.lines().any(|l| l == "/.berth/"), "{exclude}");
     let text = stdout(&out);
-    let hint = format!("cd '{}' && eval \"$(berth env)\"\n", path.display());
+    let hint = format!(
+        "{}\n",
+        berth::env::next_command_hint(&path.display().to_string(), cfg!(windows))
+    );
     assert!(text.ends_with(&hint), "{text}");
     assert!(text.lines().count() > 2, "table before hint: {text}");
     for s in [stdout(&out), stderr(&out)] {
@@ -400,7 +403,10 @@ fn spaces_in_repo_path() {
     assert_eq!(code(&out), 0, "{}", stderr(&out));
     let path = root(&fx).join("my repo.berth").join("a");
     assert!(path.join(".setup-ran").is_file());
-    let hint = format!("cd '{}' && eval \"$(berth env)\"\n", path.display());
+    let hint = format!(
+        "{}\n",
+        berth::env::next_command_hint(&path.display().to_string(), cfg!(windows))
+    );
     assert!(stdout(&out).ends_with(&hint), "{}", stdout(&out));
 }
 

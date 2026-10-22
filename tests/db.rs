@@ -152,7 +152,12 @@ fn sqlite_plan() {
     )
     .unwrap();
     assert_eq!(p.name, "data/t.db");
-    assert_eq!(p.url.as_deref(), Some("sqlite:///wt/data/t.db"));
+    // `{db.path}` is a native path; the template decides the rest.
+    let path = Path::new("/wt").join(berth::sys::native("data/t.db"));
+    assert_eq!(
+        p.url.as_deref(),
+        Some(format!("sqlite://{}", path.display()).as_str())
+    );
 }
 
 #[test]

@@ -453,7 +453,14 @@ fn sqlite_up_copies_the_template() {
     );
     assert_eq!(
         fs::read_to_string(w.join(".db-url")).unwrap(),
-        format!("file:{}\n", w.join("db/dev.sqlite").display())
+        // The URL uses `/` on every OS.
+        format!(
+            "file:{}\n",
+            w.join("db/dev.sqlite")
+                .display()
+                .to_string()
+                .replace('\\', "/")
+        )
     );
     let v = json(&out);
     assert!(

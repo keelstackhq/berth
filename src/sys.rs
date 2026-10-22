@@ -136,6 +136,16 @@ pub fn kill_tree(pid: u32) {
         .status();
 }
 
+/// A `/`-separated relative path with the OS's own separator: `\\` on Windows, unchanged on
+/// Unix (where `\\` is an ordinary file name character).
+pub fn native(rel: &str) -> String {
+    if cfg!(windows) {
+        rel.replace('/', "\\")
+    } else {
+        rel.to_string()
+    }
+}
+
 /// `fs::canonicalize` without Windows' verbatim prefix: `\\?\C:\x` becomes `C:\x` and
 /// `\\?\UNC\srv\share` becomes `\\srv\share`, because git cannot use verbatim paths. Unix:
 /// plain `fs::canonicalize`.
