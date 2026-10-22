@@ -482,6 +482,12 @@ All fetching-free; versions are **not** stated here and are pinned exactly in th
   `ci-ok` aggregate, the family pattern. No network in tests, so no secrets in CI.
 - Release (M3) through `hoist release`: static musl Linux and macOS binaries on GitHub Releases,
   the npm launcher, `cargo install`; Windows (`win32-x64`, `--format pwsh`) in M3 too.
+- Release files (hoist's own layout): root `hoist.toml` (`[publish] crates = {}`, `github_release`
+  with the five targets `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`,
+  `x86_64-apple-darwin`, `aarch64-apple-darwin`, `x86_64-pc-windows-msvc`, `bin = "berth"`); tags
+  `v{version}`. First version `0.1.0` in `Cargo.toml` and all six `package.json` (`tests/release_config.rs`
+  keeps them equal). The crate has an `include` list (`src`, `Cargo.toml`, `Cargo.lock`, `README.md`):
+  no tests, fixtures, `npm/` or docs in the `.crate` file.
 
 ## 17. Facts to verify before the milestone that needs them
 
