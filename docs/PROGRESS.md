@@ -40,6 +40,7 @@ whole-branch review fixes done; PR #3.
 - 2026-10-21 · M2 review fixes · default db name/project carry a 6-hex checkout-path hash and fit 63/30 chars; `up` on an existing task skips tool/sqlite checks; `env` survives a bad berth.toml; failed `mark_db_created` drops the db even with `--keep-on-failure`; createdb/dropdb recovery hints; spec §4/§7/§8/§11 and README · 6 new tests seen failing first, `cargo test --locked` green, real_postgres ok
 - 2026-10-22 · M3 Task 1 · M3 plan (Windows, gated hoist release, npm launcher, `berth hook`, skill and integration guide); facts checked against hoist @ 8593a37, splice @ 6f64cbd, hull @ 1994e4b and the Claude Code docs
 - 2026-10-22 · M3 Task 9 · `berth hook worktree-create|worktree-remove|session-start|statusline` (`src/ops/hook.rs`; `main` bypasses the Report; stdout is only the path / nothing / the status line); spec §3, §12 · `cargo test --test cli_hook` 23/23 (setup stdout kept off stdout, refusal 1, bad name 2, `--json` 2, remove clean/dirty/unknown, env file sourced in `sh`, hoard and `.env` canaries absent), fmt, clippy, `cargo test --locked` green
+- 2026-10-22 · M3 Task 10 · `skills/berth/SKILL.md`, `docs/integration.md` (settings.json hooks, statusline via hull's `statusline.sh`, `Read` deny rules, `berth.toml` seed, `CLAUDE.md` line, other harnesses), README "Use with Claude Code" · hook claims checked against the plan's Claude Code facts; fmt, clippy, `cargo test --locked` green
 
 ## Blocked
 
