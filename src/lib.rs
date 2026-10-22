@@ -51,6 +51,12 @@ pub struct Ctx {
 }
 
 pub fn run(cli: Cli) -> Result<Report, BerthError> {
+    // `hook` speaks the harness's protocol, not the Report: `main` calls `ops::hook::run`.
+    if let cli::Command::Hook(_) = cli.command {
+        return Err(BerthError::Usage(
+            "hook has no report; it is handled by ops::hook::run".into(),
+        ));
+    }
     let dir = match cli.dir {
         Some(dir) => dir,
         None => std::env::current_dir().map_err(|source| BerthError::Io {
@@ -72,5 +78,6 @@ pub fn run(cli: Cli) -> Result<Report, BerthError> {
         cli::Command::Env(args) => ops::env::env(&ctx, args),
         cli::Command::Gc(args) => ops::gc::gc(&ctx, args),
         cli::Command::Doctor => ops::doctor::doctor(&ctx),
+        cli::Command::Hook(_) => unreachable!("handled above"),
     }
 }
