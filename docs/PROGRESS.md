@@ -2,7 +2,7 @@
 
 ## Status
 
-Milestone 3 (distribution and integration), plan `docs/superpowers/plans/2026-10-22-berth-m3.md`: Tasks 1-2 done; Tracks A (Windows), B (release) and C (integration) in progress.
+Milestone 3 (distribution and integration), plan `docs/superpowers/plans/2026-10-22-berth-m3.md`: Tasks 1-3 done; Tracks A (Windows), B (release) and C (integration) in progress.
 
 Milestone 1 merged to `main` (PR #1, 2026-10-18; decisions channel in PR #2, 2026-10-21). Milestone 2
 (services) complete, plan `docs/superpowers/plans/2026-10-21-berth-m2.md`: Tasks 1-11 and the
@@ -40,6 +40,7 @@ whole-branch review fixes done; PR #3.
 - 2026-10-21 · M2 review fixes · default db name/project carry a 6-hex checkout-path hash and fit 63/30 chars; `up` on an existing task skips tool/sqlite checks; `env` survives a bad berth.toml; failed `mark_db_created` drops the db even with `--keep-on-failure`; createdb/dropdb recovery hints; spec §4/§7/§8/§11 and README · 6 new tests seen failing first, `cargo test --locked` green, real_postgres ok
 - 2026-10-22 · M3 Task 1 · M3 plan (Windows, gated hoist release, npm launcher, `berth hook`, skill and integration guide); facts checked against hoist @ 8593a37, splice @ 6f64cbd, hull @ 1994e4b and the Claude Code docs
 - 2026-10-22 · M3 Task 2 · portable OS layer: `sys::{find_sh, sh_from_exec_path, kill_tree, tasklist_lists_pid}`, per-OS `pid_alive`/`hostname`, hooks via `find_sh` (`process_group`/signal text unix-only), lock holder in sidecar `<lock>.holder`, git paths UTF-8 off Unix, `ports::preferred_index` via `as_encoded_bytes`, db exec check per OS; spec §8 · new `tests/sys.rs`, `tests/lock.rs` and `tests/state.rs` updated and seen failing first, `cargo test --locked` green, `cargo clippy --target x86_64-pc-windows-gnu --lib` clean (test targets gated in Task 4)
+- 2026-10-22 · M3 Task 3 · `berth env --format pwsh` (`$env:K = 'v'`, `'` and typographic quotes doubled; hoard token via `(Get-Content -Raw -LiteralPath '<file>').Trim()`, never the value); `up` hint is `Set-Location … | Invoke-Expression` on Windows only (`env::next_command_hint`); spec §3/§7 and README · `cargo test --test env` pwsh quoting + hint, `cli_cache` pwsh token line, `cli_ls_env`/`secrets` loops include pwsh; pwsh round trip returns early here (no `pwsh` on PATH), runs when present; fmt, clippy (both targets, lib), `cargo test --locked` green
 
 ## Blocked
 

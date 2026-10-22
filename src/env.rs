@@ -168,6 +168,34 @@ fn fish_quote(s: &str) -> String {
     format!("'{}'", s.replace('\\', "\\\\").replace('\'', "\\'"))
 }
 
+/// PowerShell single-quote: `'…'` with each quote character written twice. PowerShell also
+/// reads the typographic quotes U+2018, U+2019, U+201A and U+201B as single quotes, so those
+/// double too. Everything else (`$`, backtick, `"`, newline) is literal.
+pub fn pwsh_quote(s: &str) -> String {
+    let mut out = String::from("'");
+    for c in s.chars() {
+        out.push(c);
+        if matches!(c, '\'' | '\u{2018}' | '\u{2019}' | '\u{201a}' | '\u{201b}') {
+            out.push(c);
+        }
+    }
+    out.push('\'');
+    out
+}
+
+/// The command `up` suggests to enter a worktree and load its environment: POSIX shells
+/// (`windows` false) or PowerShell (the Windows default).
+pub fn next_command_hint(path: &str, windows: bool) -> String {
+    if windows {
+        format!(
+            "Set-Location -LiteralPath {}; berth env --format pwsh | Out-String | Invoke-Expression",
+            pwsh_quote(path)
+        )
+    } else {
+        format!("cd {} && eval \"$(berth env)\"", sh_quote(path))
+    }
+}
+
 fn dotenv_quote(s: &str) -> String {
     let mut out = String::from("\"");
     for c in s.chars() {
@@ -185,7 +213,7 @@ fn dotenv_quote(s: &str) -> String {
 }
 
 /// `format_env` plus the hoard remote cache: `TURBO_API` and `TURBO_TEAM` join the sorted
-/// variables; the token never does. `sh` and `fish` end with a line that reads `token_file` when
+/// variables; the token never does. `sh`, `fish` and `pwsh` end with a line that reads `token_file` when
 /// evaluated; `dotenv` and `json` leave the token out (the caller says so on stderr).
 pub fn format_env_hoard(
     env: &BTreeMap<String, String>,
@@ -207,6 +235,10 @@ pub fn format_env_hoard(
             "set -gx TURBO_TOKEN (cat {})\n",
             fish_quote(&file)
         )),
+        Format::Pwsh => out.push_str(&format!(
+            "$env:TURBO_TOKEN = (Get-Content -Raw -LiteralPath {}).Trim()\n",
+            pwsh_quote(&file)
+        )),
         Format::Dotenv | Format::Json => {}
     }
     out
@@ -224,6 +256,7 @@ pub fn format_env(env: &BTreeMap<String, String>, f: Format) -> String {
         match f {
             Format::Sh => out.push_str(&format!("export {k}={}\n", sh_quote(v))),
             Format::Fish => out.push_str(&format!("set -gx {k} {}\n", fish_quote(v))),
+            Format::Pwsh => out.push_str(&format!("$env:{k} = {}\n", pwsh_quote(v))),
             Format::Dotenv => out.push_str(&format!("{k}={}\n", dotenv_quote(v))),
             Format::Json => unreachable!(),
         }

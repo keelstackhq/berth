@@ -53,7 +53,7 @@ missing per-task state (files, ports, caches, DB, manifest) and composes with al
 berth up <task> [--base REF] [--branch NAME] [--no-setup] [--keep-on-failure] [--json]
 berth down <task> [--force] [--delete-branch] [--json]
 berth ls [--json]
-berth env [<task>] [--format sh|fish|dotenv|json]   task defaults to the worktree of the cwd
+berth env [<task>] [--format sh|fish|pwsh|dotenv|json]   task defaults to the worktree of the cwd
 berth gc [--dry-run] [--delete-branch] [--json]
 berth doctor [--json]
 ```
@@ -78,7 +78,8 @@ the rule shared by the family: `0` go, `1` look at `items`, `3` fix the environm
 ### Output
 
 Human output: a short table plus the next command (`cd ../hull.berth/fix-login && eval
-"$(berth env)"`). Logs and hook output go to stderr.
+"$(berth env)"`; on Windows `Set-Location -LiteralPath '..\hull.berth\fix-login'; berth env
+--format pwsh | Out-String | Invoke-Expression`). Logs and hook output go to stderr.
 
 `--json` prints exactly one object on stdout:
 `{ "version": 1, "command", "ok", "exit_code", "items": [ { "kind", "key", "action", "reason" } ],
@@ -226,11 +227,13 @@ Per user (ports are machine-wide): `$BERTH_STATE_DIR`, else `$XDG_STATE_HOME/ber
 - With `[cache] remote = "hoard"` and a running server (§12), `berth env` adds `TURBO_API` and
   `TURBO_TEAM=hoard`, read live (never stored in the manifest or `--json`). `sh` ends with
   `export TURBO_TOKEN="$(cat '<token file>')"` and `fish` with `set -gx TURBO_TOKEN (cat '<token
-  file>')`, so the token is never printed; `dotenv`/`json` omit it and say
+  file>')`, `pwsh` with `$env:TURBO_TOKEN = (Get-Content -Raw -LiteralPath '<token file>').Trim()`, so the token is never printed; `dotenv`/`json` omit it and say
   `note: TURBO_TOKEN is not printed; read it from <token file>` on stderr. Setup and teardown hooks
   get all three with the real token. No server: nothing exported, one `warning:` on stderr, exit 0.
 
-Formats: `sh` (`export K='v'`, escaped), `fish`, `dotenv`, `json`. Copied files' values are
+Formats: `sh` (`export K='v'`, escaped), `fish`, `pwsh` (`$env:K = 'v'`: single quotes, `'` and
+the typographic quotes U+2018/2019/201A/201B doubled; `$`, backtick, `"` and newlines are literal),
+`dotenv`, `json`. Copied files' values are
 never exported: they stay in `.env`, read by the app's own loader.
 
 ## 8. `berth up`, step by step

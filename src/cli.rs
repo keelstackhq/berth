@@ -104,6 +104,7 @@ pub struct EnvArgs {
 pub enum Format {
     Sh,
     Fish,
+    Pwsh,
     Dotenv,
     Json,
 }

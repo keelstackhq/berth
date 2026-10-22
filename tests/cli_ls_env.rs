@@ -292,7 +292,7 @@ fn env_does_not_include_copied_values() {
     write(&fx.repo, ".env", &format!("TOKEN={CANARY}\n"));
     fx.config(&fx.repo, "", "[copy]\ninclude = [\".env\"]");
     up(&fx, "a");
-    for fmt in ["sh", "fish", "dotenv", "json"] {
+    for fmt in ["sh", "fish", "pwsh", "dotenv", "json"] {
         let out = berth(&fx, &["env", "a", "--format", fmt]);
         assert_eq!(code(&out), 0, "{}", stderr(&out));
         assert!(!stdout(&out).contains(CANARY), "{fmt}");

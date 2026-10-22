@@ -5,7 +5,7 @@ use std::process::Command;
 use berth::cli::Format;
 use berth::config::DbCfg;
 use berth::db::{DbPlan, resolve};
-use berth::env::{EnvInput, build_env, expand, format_env};
+use berth::env::{EnvInput, build_env, expand, format_env, next_command_hint};
 use berth::manifest::PortBlock;
 
 fn block() -> PortBlock {
@@ -159,6 +159,64 @@ fn fish_and_dotenv_escape() {
 }
 
 #[test]
+fn pwsh_quotes_with_single_quotes_only() {
+    let one = BTreeMap::from([("K".to_string(), "it's".to_string())]);
+    assert_eq!(format_env(&one, Format::Pwsh), "$env:K = 'it''s'\n");
+    // `$`, backtick, double quotes and backslashes are literal inside single quotes; a newline
+    // stays a newline.
+    let two = BTreeMap::from([("K".to_string(), "$HOME `x` \"q\" a\\b\nc".to_string())]);
+    assert_eq!(
+        format_env(&two, Format::Pwsh),
+        "$env:K = '$HOME `x` \"q\" a\\b\nc'\n"
+    );
+    // PowerShell also treats the typographic single quotes as quote characters; double them.
+    let three = BTreeMap::from([(
+        "K".to_string(),
+        "a\u{2018}b\u{2019}c\u{201a}d\u{201b}".to_string(),
+    )]);
+    assert_eq!(
+        format_env(&three, Format::Pwsh),
+        "$env:K = 'a\u{2018}\u{2018}b\u{2019}\u{2019}c\u{201a}\u{201a}d\u{201b}\u{201b}'\n"
+    );
+}
+
+/// Round trip through a real `pwsh`; without one on PATH the test returns early (like the
+/// APFS test in copy.rs).
+#[test]
+fn pwsh_format_round_trips() {
+    if Command::new("pwsh")
+        .args(["-NoProfile", "-Command", "exit 0"])
+        .output()
+        .is_err()
+    {
+        eprintln!("note: pwsh not on PATH; skipping the pwsh round trip");
+        return;
+    }
+    let mut env = sample();
+    env.insert("G".into(), "it\u{2019}s \u{2018}x\u{2019}".into());
+    let out = format_env(&env, Format::Pwsh);
+    let dir = tempfile::tempdir().unwrap();
+    for (k, v) in &env {
+        let script = dir.path().join("t.ps1");
+        std::fs::write(&script, format!("{out}[Console]::Out.Write($env:{k})\n")).unwrap();
+        let got = Command::new("pwsh")
+            .args(["-NoProfile", "-File"])
+            .arg(&script)
+            .env_remove(k)
+            .output()
+            .unwrap();
+        assert!(
+            got.status.success(),
+            "{k}: {}",
+            String::from_utf8_lossy(&got.stderr)
+        );
+        // pwsh may translate `\n` to the platform newline when writing; compare normalized.
+        let text = String::from_utf8(got.stdout).unwrap().replace("\r\n", "\n");
+        assert_eq!(text, *v, "{k}");
+    }
+}
+
+#[test]
 fn json_is_one_sorted_object() {
     let out = format_env(&sample(), Format::Json);
     assert!(out.ends_with('\n'));
@@ -290,5 +348,17 @@ fn db_placeholder_without_db_is_unknown() {
     assert!(
         err.contains("unknown placeholder {db.url} in [env].P"),
         "{err}"
+    );
+}
+
+#[test]
+fn next_command_hint_per_shell() {
+    assert_eq!(
+        next_command_hint("/w/a b", false),
+        "cd '/w/a b' && eval \"$(berth env)\""
+    );
+    assert_eq!(
+        next_command_hint(r"C:\w\it's", true),
+        r"Set-Location -LiteralPath 'C:\w\it''s'; berth env --format pwsh | Out-String | Invoke-Expression"
     );
 }

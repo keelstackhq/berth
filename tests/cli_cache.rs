@@ -339,6 +339,28 @@ fn env_fish_reads_the_token_file() {
 }
 
 #[test]
+fn env_pwsh_reads_the_token_file() {
+    let fx = hoard_fixture("");
+    assert_eq!(code(&run(&fx, &["up", "a"])), 0);
+    let out = run(&fx, &["env", "a", "--format", "pwsh"]);
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    let text = stdout(&out);
+    assert!(!text.contains(CANARY));
+    assert!(
+        text.contains("$env:TURBO_API = 'http://127.0.0.1:41234'\n"),
+        "{text}"
+    );
+    assert!(text.contains("$env:TURBO_TEAM = 'hoard'\n"), "{text}");
+    assert_eq!(
+        text.lines().last().unwrap(),
+        format!(
+            "$env:TURBO_TOKEN = (Get-Content -Raw -LiteralPath '{}').Trim()",
+            token_path(&fx)
+        )
+    );
+}
+
+#[test]
 fn env_dotenv_and_json_omit_the_token_and_say_so() {
     let fx = hoard_fixture("");
     assert_eq!(code(&run(&fx, &["up", "a"])), 0);

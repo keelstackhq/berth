@@ -72,7 +72,7 @@ fn canary_never_printed() {
     scan_files("after up", true);
     ok(&["up", "a"]);
     ok(&["ls"]);
-    for format in ["sh", "fish", "dotenv", "json"] {
+    for format in ["sh", "fish", "pwsh", "dotenv", "json"] {
         ok(&["env", "a", "--format", format]);
     }
     scan_files("after env", true);
@@ -157,9 +157,9 @@ fn m2_canaries_never_printed() {
     );
     assert!(a.join(".turbo/cache/h1.tar.zst").exists());
     let mut sh_text = String::new();
-    for format in ["sh", "fish", "dotenv", "json"] {
+    for format in ["sh", "fish", "pwsh", "dotenv", "json"] {
         let out = step(&["env", "a", "--format", format]);
-        if format == "sh" || format == "fish" {
+        if matches!(format, "sh" | "fish" | "pwsh") {
             sh_text.push_str(&String::from_utf8_lossy(&out.stdout));
         }
     }
