@@ -41,8 +41,20 @@ whole-branch review fixes done; PR #3.
 - 2026-10-22 · M3 Task 1 · M3 plan (Windows, gated hoist release, npm launcher, `berth hook`, skill and integration guide); facts checked against hoist @ 8593a37, splice @ 6f64cbd, hull @ 1994e4b and the Claude Code docs
 - 2026-10-22 · M3 Task 5 · crate metadata (version 0.1.0, `publish = false` dropped, readme/keywords/categories/`include`) and root `hoist.toml` (5 targets, `bin = "berth"`); `tests/release_config.rs` (npm checks skip until Task 6); spec §16 · `cargo package --locked --list` shows only `src/**`, `Cargo.toml`, `Cargo.lock`, `README.md` (+ cargo-generated files), `cargo package --locked` builds; `berth --version` prints `berth 0.1.0`, no snapshot holds the version; fmt, clippy, `cargo test --locked` green
 - 2026-10-22 · M3 Task 6 · npm launcher `@keelstackhq/berth` (`npm/berth`: `bin/berth.js`, `hoist.toml` `launcher = true`) + five `npm/berth-<platform>` packages, `pnpm-workspace.yaml`, `pnpm-lock.yaml` (written by `pnpm@12.14.0 install --lockfile-only`, via npx; identical to hoist's lockfile with names swapped), ubuntu-only `node --test` CI step, README install; `release_config.rs` now enforces npm checks · `node --test npm/berth/test/*.test.js` failed first (no launcher), then 7/7; `cargo test --test release_config` 5/5; fmt, clippy, `cargo test --locked` green. Note: node 22 needs the glob, `node --test <dir>` treats the dir as a module
+- 2026-10-22 · M3 Task 7 · `.github/workflows/release.yml` (detect, build x5, publish, prepare) gated by `vars.BERTH_RELEASE == 'enabled'`: push to main with the gate off runs `detect` only, `workflow_dispatch` is a dry run (build + `berth --version` smoke on 4 targets, `file` static check on musl, x86_64 check for the Intel mac binary), `publish`/`prepare` need the gate; `@keelstackhq/hoist@0.1.0` from npm in both, no GH_TOKEN step compiles; actions pinned to SHAs (upload-artifact v7.0.0, download-artifact v8.0.0, setup-node v6.5.0, pnpm/action-setup v6.0.9 commit of the annotated tag); `docs/releasing.md`, Blocked list, spec §16 · actionlint 1.7.7 (sha256 verified) clean on both workflows; `tests/release_config.rs` 7/7 (SHA pins, gate, hoist pin); fmt, clippy, `cargo test --locked` green; shellcheck not installed. Actions run only after the branch is pushed
 
 ## Blocked
 
 - **Branch protection.** Protect `main` and require the `ci-ok` status check.
-- **Release.** No crates.io/npm release yet; `keel-berth` is unpublished.
+- **Release (owner, in this order; details in `docs/releasing.md`).** Merging publishes nothing
+  until step 4.
+  1. Publish `@keelstackhq/hoist@0.1.0` on npm (prerequisite; the workflow installs exactly that).
+  2. Create the GitHub environment `release` (branch policy `main`, required reviewers), or run
+     `hoist apply --area release`.
+  3. Optional secret `HOIST_RELEASE_TOKEN` (Contents + Pull requests: write).
+  4. Set the repository variable `BERTH_RELEASE=enabled`; the next run on `main` tags `v0.1.0`.
+  5. Locally `hoist release bootstrap`: npm placeholders for the six packages, `npm trust github`
+     for each, first crates.io publish of `keel-berth`.
+  6. crates.io trusted publisher for `keel-berth` (repo `keelstackhq/berth`, workflow
+     `release.yml`, environment `release`).
+  7. Re-run the failed `publish` job.
