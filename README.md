@@ -8,6 +8,14 @@ hook, and `berth down <task>` cleans up. One static Rust binary, part of the kee
 
 ## Install
 
+After the first release (see `docs/releasing.md`; until then build from source):
+
+```bash
+npm i -g @keelstackhq/berth     # launcher; the binary comes from a platform package
+cargo install keel-berth        # installs the binary `berth`
+# or download berth-<target> from GitHub Releases (SHA256SUMS next to it)
+```
+
 From source (Rust 1.97, git >= 2.36):
 
 ```bash

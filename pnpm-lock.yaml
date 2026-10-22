@@ -1,0 +1,35 @@
+lockfileVersion: '9.0'
+
+settings:
+  autoInstallPeers: true
+  excludeLinksFromLockfile: false
+
+importers:
+
+  npm/berth:
+    optionalDependencies:
+      '@keelstackhq/berth-darwin-arm64':
+        specifier: 0.1.0
+        version: link:../berth-darwin-arm64
+      '@keelstackhq/berth-darwin-x64':
+        specifier: 0.1.0
+        version: link:../berth-darwin-x64
+      '@keelstackhq/berth-linux-arm64':
+        specifier: 0.1.0
+        version: link:../berth-linux-arm64
+      '@keelstackhq/berth-linux-x64':
+        specifier: 0.1.0
+        version: link:../berth-linux-x64
+      '@keelstackhq/berth-win32-x64':
+        specifier: 0.1.0
+        version: link:../berth-win32-x64
+
+  npm/berth-darwin-arm64: {}
+
+  npm/berth-darwin-x64: {}
+
+  npm/berth-linux-arm64: {}
+
+  npm/berth-linux-x64: {}
+
+  npm/berth-win32-x64: {}

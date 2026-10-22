@@ -102,9 +102,6 @@ fn hoist_toml_targets_are_the_five_platforms() {
 
 #[test]
 fn launcher_and_platform_packages_agree_with_cargo() {
-    if !root().join("npm").exists() {
-        return; // skipped until the npm launcher lands (M3 Task 6)
-    }
     let version = cargo_version();
     let launcher = read_json(&npm_dir("berth").join("package.json"));
     assert_eq!(launcher["name"], "@keelstackhq/berth");
@@ -148,9 +145,6 @@ fn launcher_and_platform_packages_agree_with_cargo() {
 
 #[test]
 fn every_npm_package_is_a_known_one() {
-    if !root().join("npm").exists() {
-        return; // skipped until the npm launcher lands (M3 Task 6)
-    }
     let mut found: Vec<String> = fs::read_dir(root().join("npm"))
         .unwrap()
         .map(|e| e.unwrap().file_name().into_string().unwrap())
@@ -164,9 +158,6 @@ fn every_npm_package_is_a_known_one() {
 
 #[test]
 fn pnpm_workspace_lists_the_npm_packages() {
-    if !root().join("npm").exists() {
-        return; // skipped until the npm launcher lands (M3 Task 6)
-    }
     let text = fs::read_to_string(root().join("pnpm-workspace.yaml")).unwrap();
     assert!(text.lines().any(|l| l.trim() == "- npm/*"), "{text}");
     assert!(text.contains("linkWorkspacePackages: true"));
