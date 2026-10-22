@@ -10,7 +10,7 @@ readme = "README.md"
 keywords = ["git", "worktree", "ai-agents", "cli", "developer-tools"]
 categories = ["command-line-utilities", "development-tools"]
 # Only what builds the crate: no tests, fixtures, npm packages or docs in the .crate file.
-include = ["/src/**", "/Cargo.toml", "/Cargo.lock", "/README.md"]
+include = ["/src/**", "/Cargo.toml", "/Cargo.lock", "/README.md", "/LICENSE"]
 
 [lib]
 name = "berth"
