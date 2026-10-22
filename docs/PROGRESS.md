@@ -2,7 +2,7 @@
 
 ## Status
 
-Milestone 3 (distribution and integration), plan `docs/superpowers/plans/2026-10-22-berth-m3.md`: Tasks 1-11 done. Track B (release, PR #5) and Track C Tasks 9-10 (PR #6) merged; Track A (Windows, Tasks 2-4) and Task 11 (dogfood) on `claude/berth-m3-windows` (PR #7).
+Milestone 3 (distribution and integration), plan `docs/superpowers/plans/2026-10-22-berth-m3.md`: Tasks 1-11 done, all merged (PRs #5, #6, #7). **berth 0.1.0 is released** (2026-10-22): GitHub release `v0.1.0`, npm `@keelstackhq/berth` + 5 platform packages, crates.io `keel-berth`.
 
 Milestone 1 merged to `main` (PR #1, 2026-10-18; decisions channel in PR #2, 2026-10-21). Milestone 2
 (services) complete, plan `docs/superpowers/plans/2026-10-21-berth-m2.md`: Tasks 1-11 and the
@@ -51,24 +51,11 @@ whole-branch review fixes done; PR #3.
 - 2026-10-22 · M3 Task 4 fixes · first `windows-latest` run (d33cdd2): `sys::canonicalize` drops the `\\?\` verbatim prefix git cannot use (all callers and tests); copy staging fsyncs a writable handle (Windows refused the read-only one); `safe_relative` refuses `\` and `:` on Windows; sqlite `{db.path}` native separators, `file:` URL with `/`; tests escape JSON paths, read lock length via metadata, use drive-absolute state dirs, assert per OS for signal death and exec bits · new `strip_verbatim` and `safe_relative_on` tests seen failing first; second run (aa3c52f): native separators via `sys::native` in `TURBO_CACHE_DIR`/`VITE_CACHE_PATH`/`CARGO_TARGET_DIR`/`TMPDIR`, the hoard dir and `{db.path}`; tests build Windows-shaped expectations (pwsh next-command hint, fish `\\`, `/` in the ls snapshot), `ls` lock test bounded by its 5 s timeout instead of a 1 s wall clock; spec §7 · fmt, clippy (Linux and `x86_64-pc-windows-gnu`), `cargo test --locked` green
 - 2026-10-22 · M3 Task 11 · dogfood on example-app 434277b · launcher: `npm pack` of `npm/berth` + `berth-linux-x64` (release binary), `npm install -g` into a temp prefix, `berth --version` = `berth 0.1.0`, exit 2 passes through; `hook worktree-create` for `a`/`b` at once exit 0, 12.1 s wall (with `pnpm install`), stdout exactly the path, ports 24090-24099 and 27760-27769; turbo `lint format:check typecheck test build` in both at once 21/21 (`b` once hit a flaky api `logging.test.ts` requestId assertion, rerun green; `pnpm run ci` is `--affected` and ran 0 tasks); `hook session-start` 13 `export` lines, `bash` sources `PORT=24090`, fake `.env` secret absent from every file and stream; `hook statusline` `a :24090` inside, empty outside; `hook worktree-remove` both exit 0, worktree list as before, `ports.json` `"blocks": []`; real `claude -p --worktree` (Claude Code 2.1.308) ran WorktreeCreate + SessionStart (agent saw `PORT=23290`), `-p` never calls WorktreeRemove (removed by hand); spec §17, §18. Container note: pnpm 12's self-installed copy needed its `install.js` again
 - 2026-10-22 · splice update bot · `.github/workflows/splice.yml` (weekly + `workflow_dispatch`, `keelstackhq/splice/action@v1`, scope all) keeps the decisions channel fresh (D-004)
+- 2026-10-22 · release v0.1.0 · released from 3f9f2c2 (PR #7 merge): GitHub release `v0.1.0` (5 binaries + `SHA256SUMS`), npm `@keelstackhq/berth` and `berth-{linux-x64,linux-arm64,darwin-x64,darwin-arm64,win32-x64}` at 0.1.0, crates.io `keel-berth` 0.1.0. The `publish` job went red anyway: hoist 0.1.0's post-publish npm check waits ~8 s. `release.yml` now pins `@keelstackhq/hoist@0.2.0` (waits up to 5 min) in `publish` and `prepare`; `docs/releasing.md`, spec §16 · `tests/release_config.rs` pin check updated first and seen failing (0 of 2 matches), then 7/7; registries checked with `npm view` and the crates.io API
 
 ## Blocked
 
 - **Branch protection.** Protect `main` and require the `ci-ok` status check.
-- **Release (owner, in this order; details in `docs/releasing.md`).** `BERTH_RELEASE` is
-  `enabled` since 2026-10-22: the run on f9b2b61 (PR #5 merge) built 4 of 5 targets, Windows failed
-  to compile before the Windows port, so `publish` was skipped and nothing is tagged or published.
-  The first push to `main` after PR #7 releases `v0.1.0` if steps 1-3 and 5-6 are done.
-  1. Publish `@keelstackhq/hoist@0.1.0` on npm (prerequisite; the workflow installs exactly that).
-  2. Create the GitHub environment `release` (branch policy `main`, required reviewers), or run
-     `hoist apply --area release`.
-  3. Optional secret `HOIST_RELEASE_TOKEN` (Contents + Pull requests: write).
-  4. Set the repository variable `BERTH_RELEASE=enabled`; the next run on `main` tags `v0.1.0`.
-  5. Locally `hoist release bootstrap`: npm placeholders for the six packages, `npm trust github`
-     for each, first crates.io publish of `keel-berth`.
-  6. crates.io trusted publisher for `keel-berth` (repo `keelstackhq/berth`, workflow
-     `release.yml`, environment `release`).
-  7. Re-run the failed `publish` job.
 - **hull plan.** hull renders berth's `berth.toml` seed, skill, hooks and statusline segment
   (`docs/integration.md`); that is hull's own milestone, not started here.
 - **Decisions row.** Propose in keelstackhq/decisions: per-task agent workspaces go through
