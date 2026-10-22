@@ -1,12 +1,16 @@
 [package]
 name = "keel-berth"
-version = "0.0.0"
+version = "0.1.0"
 edition = "2024"
 rust-version = "1.97"
 description = "Give each parallel coding agent an isolated, ready workspace in a git repo"
 license = "MIT"
 repository = "https://github.com/keelstackhq/berth"
-publish = false
+readme = "README.md"
+keywords = ["git", "worktree", "ai-agents", "cli", "developer-tools"]
+categories = ["command-line-utilities", "development-tools"]
+# Only what builds the crate: no tests, fixtures, npm packages or docs in the .crate file.
+include = ["/src/**", "/Cargo.toml", "/Cargo.lock", "/README.md", "/LICENSE"]
 
 [lib]
 name = "berth"

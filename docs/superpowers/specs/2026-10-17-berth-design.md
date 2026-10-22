@@ -513,6 +513,22 @@ All fetching-free; versions are **not** stated here and are pinned exactly in th
   `ci-ok` aggregate, the family pattern. No network in tests, so no secrets in CI.
 - Release (M3) through `hoist release`: static musl Linux and macOS binaries on GitHub Releases,
   the npm launcher, `cargo install`; Windows (`win32-x64`, `--format pwsh`) in M3 too.
+- Release files (hoist's own layout): root `hoist.toml` (`[publish] crates = {}`, `github_release`
+  with the five targets `x86_64-unknown-linux-musl`, `aarch64-unknown-linux-musl`,
+  `x86_64-apple-darwin`, `aarch64-apple-darwin`, `x86_64-pc-windows-msvc`, `bin = "berth"`); tags
+  `v{version}`. First version `0.1.0` in `Cargo.toml` and all six `package.json` (`tests/release_config.rs`
+  keeps them equal). The crate has an `include` list (`src`, `Cargo.toml`, `Cargo.lock`, `README.md`):
+  no tests, fixtures, `npm/` or docs in the `.crate` file.
+- `.github/workflows/release.yml` (hoist's layout): `detect` (pending when the `Cargo.toml` version has no
+  tag or the tag is on HEAD; also reads the gate), `build` (5 targets on native runners, smoke
+  `berth --version` where the runner can execute the binary, static check of the musl binaries),
+  `publish` (`environment: release`, `@keelstackhq/hoist@0.1.0` from npm, `hoist release publish
+  --assets dist`), `prepare` (release PR). **Gate:** `publish` and `prepare` run only when the
+  repository variable `BERTH_RELEASE` is `enabled`, `build` only when a release is pending and
+  enabled or on `workflow_dispatch` (dry run). With the variable unset a push to `main` runs
+  `detect` only: merging publishes nothing. One-time owner setup and the normal flow:
+  `docs/releasing.md`. Installs (`npm i -g @keelstackhq/berth`, `cargo install keel-berth`,
+  GitHub Releases) work after the first release.
 
 ## 17. Facts to verify before the milestone that needs them
 
