@@ -24,6 +24,7 @@ berth ls [--json]
 berth env [<task>] [--format sh|fish|pwsh|dotenv|json]
 berth doctor [--json]
 berth gc [--dry-run] [--delete-branch] [--json]
+berth hook worktree-create|worktree-remove|session-start|statusline   (Claude Code; JSON on stdin)
 ```
 
 Global flags: `-C <dir>`, `--json`, `--no-color`, `-v` (prints each git command and hook command
@@ -46,6 +47,15 @@ to stderr, never file contents or env values). `<task>` is a slug `^[a-z0-9][a-z
   `--dry-run` only reports.
 
 Worktrees default to a sibling directory `../<repo>.berth/<task>`.
+
+## Use with Claude Code
+
+`berth hook` speaks Claude Code's hook protocol: `WorktreeCreate` and `WorktreeRemove` make
+`claude --worktree` and subagent worktrees berth worktrees, `SessionStart` exports `berth env`
+into the session, and the status line shows `<task> :<PORT>`. Other harnesses call
+`berth up <task> --json`. The settings snippet, the `berth` skill (`skills/berth/SKILL.md`),
+the `Read` deny rules for copied secrets and a `berth.toml` seed are in
+[docs/integration.md](docs/integration.md).
 
 ## berth.toml
 

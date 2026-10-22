@@ -2,7 +2,7 @@
 
 ## Status
 
-Milestone 3 (distribution and integration), plan `docs/superpowers/plans/2026-10-22-berth-m3.md`: Tasks 1-4 done; Tracks A (Windows), B (release) and C (integration) in progress.
+Milestone 3 (distribution and integration), plan `docs/superpowers/plans/2026-10-22-berth-m3.md`: Tasks 1-4 done on `claude/berth-m3-windows` (PR #7, Windows CI leg not yet green); Track C Tasks 9-10 merged (PR #6); Track B (release, PR #5) and Task 11 (dogfood) in progress.
 
 Milestone 1 merged to `main` (PR #1, 2026-10-18; decisions channel in PR #2, 2026-10-21). Milestone 2
 (services) complete, plan `docs/superpowers/plans/2026-10-21-berth-m2.md`: Tasks 1-11 and the
@@ -42,6 +42,8 @@ whole-branch review fixes done; PR #3.
 - 2026-10-22 · M3 Task 2 · portable OS layer: `sys::{find_sh, sh_from_exec_path, kill_tree, tasklist_lists_pid}`, per-OS `pid_alive`/`hostname`, hooks via `find_sh` (`process_group`/signal text unix-only), lock holder in sidecar `<lock>.holder`, git paths UTF-8 off Unix, `ports::preferred_index` via `as_encoded_bytes`, db exec check per OS; spec §8 · new `tests/sys.rs`, `tests/lock.rs` and `tests/state.rs` updated and seen failing first, `cargo test --locked` green, `cargo clippy --target x86_64-pc-windows-gnu --lib` clean (test targets gated in Task 4)
 - 2026-10-22 · M3 Task 3 · `berth env --format pwsh` (`$env:K = 'v'`, `'` and typographic quotes doubled; hoard token via `(Get-Content -Raw -LiteralPath '<file>').Trim()`, never the value); `up` hint is `Set-Location … | Invoke-Expression` on Windows only (`env::next_command_hint`); spec §3/§7 and README · `cargo test --test env` pwsh quoting + hint, `cli_cache` pwsh token line, `cli_ls_env`/`secrets` loops include pwsh; pwsh round trip returns early here (no `pwsh` on PATH), runs when present; fmt, clippy (both targets, lib), `cargo test --locked` green
 - 2026-10-22 · M3 Task 4 · `windows-latest` leg in `ci` (`fail-fast: false`, `ci-ok` unchanged); tests/common uses an empty gitconfig file and `core.autocrlf=false`, portable PATH join; Unix-only tests gated `#[cfg(unix)]` with reasons; spec §13/§16 · fmt, clippy (host and `x86_64-pc-windows-gnu --all-targets`), `cargo test --locked` green locally; Windows leg result recorded in the follow-up commits
+- 2026-10-22 · M3 Task 9 · `berth hook worktree-create|worktree-remove|session-start|statusline` (`src/ops/hook.rs`; `main` bypasses the Report; stdout is only the path / nothing / the status line); spec §3, §12 · `cargo test --test cli_hook` 23/23 (setup stdout kept off stdout, refusal 1, bad name 2, `--json` 2, remove clean/dirty/unknown, env file sourced in `sh`, hoard and `.env` canaries absent), fmt, clippy, `cargo test --locked` green
+- 2026-10-22 · M3 Task 10 · `skills/berth/SKILL.md`, `docs/integration.md` (settings.json hooks, statusline via hull's `statusline.sh`, `Read` deny rules, `berth.toml` seed, `CLAUDE.md` line, other harnesses), README "Use with Claude Code" · hook claims checked against the plan's Claude Code facts; fmt, clippy, `cargo test --locked` green
 
 ## Blocked
 
