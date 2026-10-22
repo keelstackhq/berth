@@ -114,8 +114,10 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> Result<(), BerthError> {
         file.write_all(bytes)?;
         file.sync_all()?;
         std::fs::rename(&tmp, path)?;
-        // Persist the rename itself.
-        std::fs::File::open(dir)?.sync_all()
+        // Persist the rename itself. Unix only: Windows cannot open a directory as a file.
+        #[cfg(unix)]
+        std::fs::File::open(dir)?.sync_all()?;
+        Ok(())
     })();
     if let Err(source) = result {
         let _ = std::fs::remove_file(&tmp);

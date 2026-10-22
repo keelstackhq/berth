@@ -110,7 +110,7 @@ fn world() -> Fixture {
         "",
         &format!(
             "[teardown]\nrun = ['echo \"$PWD\" >> \"{}\"']",
-            log.display()
+            common::sh_path(&log)
         ),
     );
     for t in ["merged", "squashed", "open", "fresh", "dirty", "broken"] {

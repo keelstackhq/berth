@@ -215,3 +215,9 @@ pub fn write(dir: &Path, rel: &str, content: &str) {
     }
     fs::write(path, content).expect("write");
 }
+
+/// A path as text for a TOML string or an `sh` script: forward slashes, which `sh` and Windows
+/// both accept (backslashes are escapes in TOML and in unquoted sh).
+pub fn sh_path(path: &Path) -> String {
+    path.display().to_string().replace('\\', "/")
+}

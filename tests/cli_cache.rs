@@ -255,7 +255,7 @@ fn hooks_get_the_hoard_variables() {
         &format!(
             "[cache]\nremote = \"hoard\"\n[setup]\nrun = [\"echo \\\"$TURBO_API $TURBO_TEAM $TURBO_TOKEN\\\" > .hoard-seen\"]\n\
              [teardown]\nrun = [\"echo \\\"$TURBO_API $TURBO_TEAM $TURBO_TOKEN\\\" > '{}'\"]",
-            seen.display()
+            common::sh_path(&seen)
         ),
     );
     let out = run(&fx, &["up", "a", "-v"]);
@@ -284,7 +284,7 @@ fn rollback_teardown_gets_the_hoard_variables() {
         &format!(
             "[cache]\nremote = \"hoard\"\n[setup]\nrun = [\"exit 4\"]\n\
              [teardown]\nrun = [\"echo \\\"$TURBO_TOKEN\\\" > '{}'\"]",
-            seen.display()
+            common::sh_path(&seen)
         ),
     );
     let out = run(&fx, &["up", "a"]);

@@ -214,7 +214,10 @@ fn lock_timeout_names_holder() {
 fn lock_timeout_after_setup_says_run_down() {
     let fx = Fixture::new();
     let marker = fx.root.path().join("setup-started");
-    let setup = format!("[setup]\nrun = [\"touch '{}'; sleep 1\"]", marker.display());
+    let setup = format!(
+        "[setup]\nrun = [\"touch '{}'; sleep 1\"]",
+        common::sh_path(&marker)
+    );
     fx.config(&fx.repo, "", &setup);
     let child = fx
         .berth_std()
