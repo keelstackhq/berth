@@ -69,7 +69,9 @@ fn exec(dir: &Path, args: &[&OsStr], stdin: Option<Vec<u8>>) -> Result<Output, B
         .collect();
     vlog(&format!("git {}", shown.join(" ")));
     let mut cmd = Command::new("git");
-    cmd.arg("-C")
+    // Windows: deep node_modules trees in a worktree exceed MAX_PATH; harmless elsewhere.
+    cmd.args(["-c", "core.longpaths=true"])
+        .arg("-C")
         .arg(dir)
         .args(args)
         .env("GIT_TERMINAL_PROMPT", "0")

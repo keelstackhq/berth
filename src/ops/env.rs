@@ -56,6 +56,6 @@ pub(crate) fn cwd_entry<'a>(ctx: &Ctx, manifest: &'a Manifest) -> Result<&'a Ent
     manifest
         .worktrees
         .iter()
-        .find(|e| here.starts_with(canon(&e.path)))
+        .find(|e| crate::sys::path_within(&here, &canon(&e.path)))
         .ok_or_else(|| BerthError::Usage("not inside a berth worktree; pass <task>".into()))
 }

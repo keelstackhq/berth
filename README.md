@@ -41,11 +41,14 @@ to stderr, never file contents or env values). `<task>` is a slug `^[a-z0-9][a-z
 - `up` makes the worktree and branch (`berth/<task>`), copies the allow-listed untracked files,
   reserves a port block and runs `[setup]`. Repeating it on a healthy task is `ok`; a different
   `--base`, `--branch` or port count is `drift`.
-- `down` (task defaults to the worktree you are in) runs `[teardown]` and removes the worktree and its port block. It refuses a dirty
-  worktree (`--force` overrides). The branch stays unless `--delete-branch` and it is merged
+- `down` (task defaults to the worktree you are in) runs `[teardown]` and removes the worktree
+  and its port block. Run from inside the worktree, berth first moves its own cwd to the main
+  checkout (your shell must `cd` out). An unknown task is a no-op (exit 0). It refuses a dirty
+  worktree, untracked files included (`--force` overrides). The branch stays unless `--delete-branch` and it is merged
   into `[worktree].base`.
-- `ls` lists worktrees with state, ahead/behind, dirty and listening ports. `env` prints the
-  environment of a task, or of the worktree you are in: `eval "$(berth env)"` (PowerShell: `berth env --format pwsh | Out-String | Invoke-Expression`).
+- `ls` lists worktrees with state, ahead/behind, dirty and (while something listens) ports.
+  `env` prints the environment of a task, or of the worktree you are in: `eval "$(berth env)"`
+  (PowerShell: `berth env --format pwsh | Out-String | Invoke-Expression`).
 - `doctor` checks git, config, copy rules, root, port registry, manifest and owners, plus the
   database tools, the sqlite template, turbo seeding and the hoard server when configured.
   `ls`, `env` and `doctor` take no locks and write nothing.
@@ -54,7 +57,8 @@ to stderr, never file contents or env values). `<task>` is a slug `^[a-z0-9][a-z
   rebase). Fresh, dirty and unmerged tasks are kept. berth never fetches: `git pull` first.
   `--dry-run` only reports.
 
-Worktrees default to a sibling directory `../<repo>.berth/<task>`.
+Worktrees default to a sibling directory `../<repo>.berth/<task>`. On Windows, paths compare
+case-insensitively and git runs with `core.longpaths=true`.
 
 ## Use with Claude Code
 

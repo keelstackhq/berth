@@ -162,11 +162,10 @@ fn worktree_remove(cli: &Cli, payload: &Value) -> Result<i32, BerthError> {
     };
     let manifest = Manifest::load(&repo.main)?;
     let wanted = canon_lossy(&target);
-    let Some(entry) = manifest
-        .worktrees
-        .iter()
-        .find(|e| canon_lossy(&e.path) == wanted)
-    else {
+    let Some(entry) = manifest.worktrees.iter().find(|e| {
+        crate::sys::path_within(&wanted, &canon_lossy(&e.path))
+            && crate::sys::path_within(&canon_lossy(&e.path), &wanted)
+    }) else {
         eprintln!(
             "note: no berth task owns {}; nothing to remove",
             target.display()
@@ -268,7 +267,7 @@ fn locate(dir: &Path) -> Option<(PathBuf, Entry)> {
     let entry = manifest
         .worktrees
         .iter()
-        .find(|e| here.starts_with(canon_lossy(&e.path)))?
+        .find(|e| crate::sys::path_within(&here, &canon_lossy(&e.path)))?
         .clone();
     Some((repo.main, entry))
 }
