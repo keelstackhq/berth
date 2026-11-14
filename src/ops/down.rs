@@ -17,7 +17,13 @@ use crate::report::{Action, Item, Report};
 use crate::{BerthError, Ctx, sys};
 
 pub fn down(ctx: &Ctx, args: &DownArgs) -> Result<Report, BerthError> {
-    down_task(ctx, args.task.as_str(), args.force, args.delete_branch)
+    let task = match &args.task {
+        Some(task) => task.as_str().to_string(),
+        None => crate::ops::env::cwd_entry(ctx, &Manifest::load(&ctx.repo.main)?)?
+            .task
+            .clone(),
+    };
+    down_task(ctx, &task, args.force, args.delete_branch)
 }
 
 /// `berth down <task>` for a task name already validated (also used by `gc`).

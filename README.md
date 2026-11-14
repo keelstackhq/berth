@@ -3,12 +3,12 @@
 berth gives each parallel coding agent an isolated, ready workspace in a git repo: `berth up
 <task>` creates a worktree, copies local env files, reserves a block of ports and runs your setup
 hook, and `berth down <task>` cleans up. One static Rust binary, part of the keelstackhq family
-(hull, splice, hoard, hoist, berth, bosun). Status: M1 (local use, built from source). Design:
+(hull, splice, hoard, hoist, berth, bosun). Design:
 `docs/superpowers/specs/2026-10-17-berth-design.md`.
 
 ## Install
 
-After the first release (see `docs/releasing.md`; until then build from source):
+Released builds (see `docs/releasing.md`):
 
 ```bash
 npm i -g @keelstackhq/berth     # launcher; the binary comes from a platform package
@@ -27,7 +27,7 @@ cargo install --path .        # package `keel-berth`, installs the binary `berth
 
 ```
 berth up <task> [--base REF] [--branch NAME] [--no-setup] [--keep-on-failure] [--json]
-berth down <task> [--force] [--delete-branch] [--json]
+berth down [<task>] [--force] [--delete-branch] [--json]
 berth ls [--json]
 berth env [<task>] [--format sh|fish|pwsh|dotenv|json]
 berth doctor [--json]
@@ -41,7 +41,7 @@ to stderr, never file contents or env values). `<task>` is a slug `^[a-z0-9][a-z
 - `up` makes the worktree and branch (`berth/<task>`), copies the allow-listed untracked files,
   reserves a port block and runs `[setup]`. Repeating it on a healthy task is `ok`; a different
   `--base`, `--branch` or port count is `drift`.
-- `down` runs `[teardown]` and removes the worktree and its port block. It refuses a dirty
+- `down` (task defaults to the worktree you are in) runs `[teardown]` and removes the worktree and its port block. It refuses a dirty
   worktree (`--force` overrides). The branch stays unless `--delete-branch` and it is merged
   into `[worktree].base`.
 - `ls` lists worktrees with state, ahead/behind, dirty and listening ports. `env` prints the

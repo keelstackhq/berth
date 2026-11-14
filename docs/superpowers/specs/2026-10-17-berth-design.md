@@ -51,7 +51,7 @@ missing per-task state (files, ports, caches, DB, manifest) and composes with al
 
 ```
 berth up <task> [--base REF] [--branch NAME] [--no-setup] [--keep-on-failure] [--json]
-berth down <task> [--force] [--delete-branch] [--json]
+berth down [<task>] [--force] [--delete-branch] [--json]   task defaults to the worktree of the cwd (else exit 2)
 berth ls [--json]
 berth env [<task>] [--format sh|fish|pwsh|dotenv|json]   task defaults to the worktree of the cwd
 berth gc [--dry-run] [--delete-branch] [--json]

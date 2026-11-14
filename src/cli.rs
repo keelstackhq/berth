@@ -90,7 +90,8 @@ pub struct UpArgs {
 
 #[derive(Debug, Args)]
 pub struct DownArgs {
-    pub task: Task,
+    /// Task (default: the worktree of the current directory)
+    pub task: Option<Task>,
     /// Remove even with uncommitted changes
     #[arg(long)]
     pub force: bool,
@@ -149,15 +150,42 @@ impl FromStr for Task {
             Ok(Task(s.to_string()))
         } else {
             Err(format!(
-                "invalid task `{s}`: use 1-48 characters of a-z, 0-9 and `-`, starting with a letter or digit"
+                "invalid task `{s}`: use 1-48 characters of a-z, 0-9 and `-`, starting with a letter or digit{}",
+                match suggest(s) {
+                    Some(slug) => format!("; try `{slug}`"),
+                    None => String::new(),
+                }
             ))
         }
     }
 }
 
+/// A valid slug close to `s` (lowercase, runs of other characters become one `-`), if any.
+fn suggest(s: &str) -> Option<String> {
+    let mut out = String::new();
+    for c in s.to_ascii_lowercase().chars() {
+        if c.is_ascii_lowercase() || c.is_ascii_digit() {
+            out.push(c);
+        } else if !out.is_empty() && !out.ends_with('-') {
+            out.push('-');
+        }
+    }
+    let slug: String = out.trim_end_matches('-').chars().take(48).collect();
+    let slug = slug.trim_end_matches('-').to_string();
+    (!slug.is_empty() && slug != s).then_some(slug)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn invalid_slug_gets_a_suggestion() {
+        let err = |s: &str| s.parse::<Task>().unwrap_err();
+        assert!(err("Fix Login").ends_with("; try `fix-login`"));
+        assert!(err("feature/x_y").ends_with("; try `feature-x-y`"));
+        assert!(err("---").ends_with("starting with a letter or digit"));
+    }
 
     #[test]
     fn slug_rules() {

@@ -19,10 +19,10 @@ src/manifest.rs             Manifest/Entry types + I/O, write_atomic (.agents/wo
 src/registry.rs sys.rs      ports.json registry, state dir; time, pid and process-group helpers
 src/lock.rs                 flock locks with holder record; read-only is_held probe
 src/ports.rs                block allocation: FNV-1a placement, bind+connect probe
-                            git, copy, hooks and ops/{up,down,ls,env,doctor} follow per plan
+                            git.rs copy.rs hooks.rs db.rs cache.rs ops/{up,down,ls,env,gc,doctor,hook}
 tests/common/mod.rs         Fixture: hermetic repo, HOME, state dir, TMPDIR, port window
 tests/cli_*.rs              integration tests; insta snapshots in tests/snapshots/
-.github/workflows/ci.yml    job ci (ubuntu, macos) + ci-ok
+.github/workflows/ci.yml    job ci (ubuntu, macos, windows) + ci-ok
 ```
 
 ## Commands

@@ -133,7 +133,7 @@ path=$(printf '%s' "$out" | jq -r '.worktrees[0].path')
 - stdout is exactly one JSON object (also for errors); logs and setup output go to stderr.
 - Exit codes: `0` ok, `1` refused or drift (read `items`), `2` usage, `3` configuration or
   environment error.
-- `berth up` is idempotent, so call it at every session start. Finish with `berth down <task>`;
+- `berth up` is idempotent, so call it at every session start. Finish with `berth down` (in the worktree) or `berth down <task>`;
   `berth gc` removes merged, clean tasks in bulk.
 - Other tools can read `<repo>/.agents/worktrees.json` (version 1) for task, branch, path and
   ports. It never contains file contents or secrets.

@@ -106,3 +106,13 @@ fn unknown_subcommand_with_json_prints_one_report() {
     assert_eq!(v["items"][0]["key"], "usage");
     assert!(stderr.contains("nope"), "{stderr}");
 }
+
+#[test]
+fn skill_stays_under_60_lines() {
+    let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("skills/berth/SKILL.md");
+    let lines = std::fs::read_to_string(path).unwrap().lines().count();
+    assert!(
+        lines <= 60,
+        "SKILL.md has {lines} lines; keep it at 60 or fewer"
+    );
+}
