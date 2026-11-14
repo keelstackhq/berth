@@ -19,10 +19,10 @@ use crate::{BerthError, Ctx, config, git, sys};
 /// What `up` keeps out of git, checked as paths below the entry (a directory pattern matches).
 const EXCLUDED: [&str; 2] = [".agents/worktrees.json", ".berth/x"];
 
-/// A `creating` entry whose owner is alive on this host is an `up` in progress, not drift.
-/// An owner on another host cannot be verified, so it is never exempt.
+/// A `creating` (or `removing`) entry whose owner is alive on this host is an `up` (or `down`)
+/// in progress, not drift. An owner on another host cannot be verified, so it is never exempt.
 fn in_progress(e: &crate::manifest::Entry) -> bool {
-    e.state == State::Creating
+    matches!(e.state, State::Creating | State::Removing)
         && e.owner.host == sys::hostname()
         && sys::pid_alive(e.owner.pid, &e.owner.host)
 }
@@ -121,16 +121,32 @@ fn repair(ctx: &Ctx) -> Result<Vec<Item>, BerthError> {
     let main = &ctx.repo.main;
     let mut out = Vec::new();
     if manifest_path(main).exists() {
-        let broken: Vec<(String, &'static str)> = Manifest::load(main)?
-            .worktrees
-            .iter()
-            .filter_map(|e| match e.state {
-                State::Creating if !in_progress(e) => Some((e.task.clone(), "interrupted up")),
-                State::Removing => Some((e.task.clone(), "interrupted down")),
-                State::Ready if !e.path.exists() => Some((e.task.clone(), "directory deleted")),
-                _ => None,
-            })
-            .collect();
+        let here = sys::hostname();
+        let mut broken: Vec<(String, &'static str)> = Vec::new();
+        for e in &Manifest::load(main)?.worktrees {
+            let task = e.task.as_str();
+            match e.state {
+                // Another host's owner cannot be checked: never remove, tell the user how.
+                State::Creating | State::Removing if e.owner.host != here => {
+                    out.push(Item::new(
+                        "worktree",
+                        task,
+                        Action::Drift,
+                        format!(
+                            "owner on another host ({}); cannot verify; run berth down --force {task} if it is gone",
+                            e.owner.host
+                        ),
+                    ));
+                }
+                State::Creating | State::Removing if in_progress(e) => {}
+                State::Creating => broken.push((task.to_string(), "interrupted up")),
+                State::Removing => broken.push((task.to_string(), "interrupted down")),
+                State::Ready if !e.path.exists() => {
+                    broken.push((task.to_string(), "directory deleted"));
+                }
+                _ => {}
+            }
+        }
         for (task, why) in broken {
             let report = crate::ops::down::down_task(ctx, &task, true, false)?;
             let item = if report.exit_code == 0 {

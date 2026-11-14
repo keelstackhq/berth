@@ -114,6 +114,11 @@ pub(crate) fn down_task(
     // 5. Mark `removing`, then work without the repo lock (the teardown hook may be slow).
     let mut removing = entry.clone();
     removing.state = State::Removing;
+    // Owner = this down, so `doctor --fix` can tell it from one that died.
+    removing.owner = crate::manifest::Owner {
+        pid: std::process::id(),
+        host: sys::hostname(),
+    };
     manifest.upsert(removing);
     manifest.save(main)?;
     drop(guard);

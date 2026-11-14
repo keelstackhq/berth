@@ -429,7 +429,8 @@ reserved ports re-probed; `creating` entries with dead owners. Exit 1 on any dri
 Lock-free and file-free like `ls`, unless `--fix`: then it first repairs what a crash leaves (a
 `creating` entry with a dead owner, a `removing` entry, a `ready` entry whose directory is gone: each
 `down --force`; stale registry blocks of any repo: removed under the user lock), reports each as a
-`remove` item, and re-checks; exit 1 only for drift it could not fix. Without `--fix` it writes nothing. Manifest, exclude, port and owner checks run only when
+`remove` item; a live same-host owner is in progress (`down` records itself as owner of a `removing`
+entry), and an owner on another host is never removed (drift: `berth down --force <task>`), and re-checks; exit 1 only for drift it could not fix. Without `--fix` it writes nothing. Manifest, exclude, port and owner checks run only when
 `.agents/worktrees.json` exists. A listening port is drift only when its task is not `ready` or
 its worktree directory is gone.
 With `[db]`: `db tools` is `drift` when `createdb`/`dropdb` (postgres) or `docker` (compose) is

@@ -620,3 +620,86 @@ fn doctor_fix_on_a_healthy_repo_changes_nothing() {
     assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
     assert!(wt(&fx, "a").exists());
 }
+
+fn set_entry(fx: &Fixture, state: &str, pid: u32, host: &str) {
+    let path = fx.repo.join(".agents/worktrees.json");
+    let mut m: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    m["worktrees"][0]["state"] = state.into();
+    m["worktrees"][0]["owner"]["pid"] = pid.into();
+    m["worktrees"][0]["owner"]["host"] = host.into();
+    fs::write(&path, serde_json::to_vec_pretty(&m).unwrap()).unwrap();
+}
+
+#[test]
+fn doctor_fix_keeps_a_creating_task_of_another_host() {
+    let fx = Fixture::new();
+    fx.config(&fx.repo, "", "");
+    up(&fx, "a");
+    write(&wt(&fx, "a"), "work.txt", "unsaved");
+    set_entry(&fx, "creating", 4_000_000, "some-other-host");
+    let out = berth(&fx, &["doctor", "--fix", "--json"]);
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(out.status.code(), Some(1), "{v}");
+    assert!(wt(&fx, "a").join("work.txt").exists(), "files were deleted");
+    assert!(
+        !v["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|i| i["action"] == "remove")
+    );
+    let reasons = v.to_string();
+    assert!(
+        reasons.contains("cannot verify") && reasons.contains("berth down --force a"),
+        "{v}"
+    );
+}
+
+#[test]
+fn doctor_fix_skips_a_removing_task_with_a_live_owner() {
+    let fx = Fixture::new();
+    fx.config(&fx.repo, "", "");
+    up(&fx, "a");
+    write(&wt(&fx, "a"), "work.txt", "unsaved");
+    set_entry(&fx, "removing", std::process::id(), &berth::sys::hostname());
+    let out = berth(&fx, &["doctor", "--fix", "--json"]);
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert!(wt(&fx, "a").join("work.txt").exists(), "{v}");
+    assert!(
+        !v["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|i| i["action"] == "remove")
+    );
+}
+
+#[test]
+fn down_records_itself_as_owner_while_removing() {
+    let fx = Fixture::new();
+    fx.config(&fx.repo, "", "[teardown]\nrun = \"sleep 4\"");
+    up(&fx, "a");
+    let mut child = fx.berth_std().args(["down", "a"]).spawn().unwrap();
+    let path = fx.repo.join(".agents/worktrees.json");
+    let mut owner = None;
+    for _ in 0..80 {
+        if let Ok(b) = fs::read(&path) {
+            if let Ok(m) = serde_json::from_slice::<Value>(&b) {
+                if m["worktrees"][0]["state"] == "removing" {
+                    owner = Some(m["worktrees"][0]["owner"]["pid"].as_u64().unwrap());
+                    break;
+                }
+            }
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+    let pid = owner.expect("entry never became removing");
+    assert_eq!(pid, u64::from(child.id()));
+    let out = berth(&fx, &["doctor", "--fix", "--json"]);
+    assert!(
+        wt(&fx, "a").exists(),
+        "doctor --fix removed a task mid-down: {}",
+        stderr(&out)
+    );
+    child.wait().unwrap();
+}
