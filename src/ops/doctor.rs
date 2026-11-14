@@ -1,5 +1,5 @@
 //! `berth doctor` (spec §11): read-only checks, one or more items each. Takes no lock and
-//! creates no file; registry staleness goes through `registry::is_stale` (a `lock::is_held`
+//! creates no file, except under `--fix` (`repair`); registry staleness goes through `registry::is_stale` (a `lock::is_held`
 //! probe, never `acquire`). Exit 1 on any `drift`, 3 on errors.
 
 use std::collections::BTreeSet;
@@ -19,10 +19,10 @@ use crate::{BerthError, Ctx, config, git, sys};
 /// What `up` keeps out of git, checked as paths below the entry (a directory pattern matches).
 const EXCLUDED: [&str; 2] = [".agents/worktrees.json", ".berth/x"];
 
-/// A `creating` entry whose owner is alive on this host is an `up` in progress, not drift.
-/// An owner on another host cannot be verified, so it is never exempt.
+/// A `creating` (or `removing`) entry whose owner is alive on this host is an `up` (or `down`)
+/// in progress, not drift. An owner on another host cannot be verified, so it is never exempt.
 fn in_progress(e: &crate::manifest::Entry) -> bool {
-    e.state == State::Creating
+    matches!(e.state, State::Creating | State::Removing)
         && e.owner.host == sys::hostname()
         && sys::pid_alive(e.owner.pid, &e.owner.host)
 }
@@ -31,10 +31,12 @@ fn canon(path: &Path) -> PathBuf {
     crate::sys::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
 }
 
-pub fn doctor(ctx: &Ctx) -> Result<Report, BerthError> {
+pub fn doctor(ctx: &Ctx, fix: bool) -> Result<Report, BerthError> {
     let main = &ctx.repo.main;
     let mut report = Report::new("doctor");
+    let fixed = if fix { repair(ctx)? } else { Vec::new() };
     let items = &mut report.items;
+    items.extend(fixed);
 
     let (major, minor) = git::check_version()?;
     items.push(Item::new(
@@ -110,6 +112,82 @@ pub fn doctor(ctx: &Ctx) -> Result<Report, BerthError> {
         report.exit_code = 1;
     }
     Ok(report)
+}
+
+/// `--fix`: what a killed `up`, `down` or deleted directory leaves behind, repaired in the same
+/// order every command uses (repo lock inside `down_task`, then the user lock; never both held).
+/// Tasks go through `down_task --force`, which removes only a never-finished or vanished worktree.
+fn repair(ctx: &Ctx) -> Result<Vec<Item>, BerthError> {
+    let main = &ctx.repo.main;
+    let mut out = Vec::new();
+    if manifest_path(main).exists() {
+        let here = sys::hostname();
+        let mut broken: Vec<(String, &'static str)> = Vec::new();
+        for e in &Manifest::load(main)?.worktrees {
+            let task = e.task.as_str();
+            match e.state {
+                // Another host's owner cannot be checked: never remove, tell the user how.
+                State::Creating | State::Removing if e.owner.host != here => {
+                    out.push(Item::new(
+                        "worktree",
+                        task,
+                        Action::Drift,
+                        format!(
+                            "owner on another host ({}); cannot verify; run berth down --force {task} if it is gone",
+                            e.owner.host
+                        ),
+                    ));
+                }
+                State::Creating | State::Removing if in_progress(e) => {}
+                State::Creating => broken.push((task.to_string(), "interrupted up")),
+                State::Removing => broken.push((task.to_string(), "interrupted down")),
+                State::Ready if !e.path.exists() => {
+                    broken.push((task.to_string(), "directory deleted"));
+                }
+                _ => {}
+            }
+        }
+        for (task, why) in broken {
+            let report = crate::ops::down::down_task(ctx, &task, true, false)?;
+            let item = if report.exit_code == 0 {
+                Item::new("worktree", &task, Action::Remove, format!("{why}: removed"))
+            } else {
+                let reason = report
+                    .items
+                    .iter()
+                    .find(|i| i.action == Action::Refused)
+                    .map_or_else(|| why.to_string(), |i| i.reason.clone());
+                Item::new("worktree", &task, Action::Drift, reason)
+            };
+            out.push(item);
+        }
+    }
+    let state = registry::state_dir()?;
+    if Registry::load(&state)?
+        .blocks
+        .iter()
+        .any(registry::is_stale)
+    {
+        let _guard = crate::ops::up::user_lock(&state)?;
+        let mut reg = Registry::load(&state)?;
+        let gone: Vec<_> = reg
+            .blocks
+            .iter()
+            .filter(|b| registry::is_stale(b))
+            .cloned()
+            .collect();
+        reg.remove_where(|b| gone.contains(b));
+        reg.save(&state)?;
+        for b in gone {
+            out.push(Item::new(
+                "registry",
+                format!("{}-{}", b.start, b.end),
+                Action::Remove,
+                format!("stale: {} {}", b.repo.display(), b.task),
+            ));
+        }
+    }
+    Ok(out)
 }
 
 fn root_item(main: &Path, root: &Path) -> Result<Item, BerthError> {

@@ -13,8 +13,7 @@ or a second clone, and never start a dev server on a fixed port.
 
 - **Start a task:** `berth up <task> --json`. `<task>` is a slug (`fix-login`: `a-z`, `0-9`, `-`, max 48).
   Calling it again on a healthy task is safe and returns `ok`.
-- **Get the environment** in the current shell: `eval "$(berth env)"` inside the worktree, or
-  `berth env <task>` (`--format sh|fish|dotenv|json`). Skip it when `$BERTH_TASK` is set.
+- **Environment:** `eval "$(berth env)"` inside the worktree; skip it when `$BERTH_TASK` is set.
 - **See what exists:** `berth ls` (state, ahead/behind, dirty; ports show only while something listens).
 - **Finish a task:** commit your work, then `berth down` (inside the worktree) or
   `berth down <task>`. It refuses a dirty worktree (untracked files count: `git add` and commit
@@ -22,7 +21,8 @@ or a second clone, and never start a dev server on a fixed port.
   branch is merged. Run from inside the worktree, it removes your cwd: `cd` to the main checkout
   afterwards. `down` of an unknown task exits 0 with `no such task`: check the name with `berth ls`.
 - **Clean up after merges:** `berth gc --dry-run`, then `berth gc` (merged, clean, ready tasks).
-  **Something looks off:** `berth doctor`.
+  **Killed or odd state:** run `berth up <task>` again (it redoes an interrupted one), or
+  `berth doctor --fix` (removes interrupted tasks and stale ports).
 
 ## Reading `berth up <task> --json`
 
@@ -56,5 +56,5 @@ stdout is exactly one JSON object:
   (`vite --port "$WEB_PORT"`) and to test runners.
 - **Stay inside your worktree**; never touch the main checkout or another task's directory, and
   never edit `.agents/worktrees.json` or `berth.toml` to change your allocation.
-- With `--json`, errors still print one JSON object on stdout (`ok:false`, reason in `items`).
-- Logs, git and hook output go to stderr; parse stdout only.
+- Errors with `--json` still print one JSON object (`ok:false`). Logs and hook output go to
+  stderr; parse stdout only.

@@ -66,6 +66,11 @@ pub fn hostname() -> String {
         .unwrap_or_else(|| "unknown".to_string())
 }
 
+/// Reads a `kill -0` result: success, or EPERM (another user's live process), means alive.
+pub fn kill_probe_alive(success: bool, output: &str) -> bool {
+    success || output.to_ascii_lowercase().contains("not permitted")
+}
+
 /// Whether `pid` on `host` may still be running. Another host: assume yes. Spawn error: assume yes.
 pub fn pid_alive(pid: u32, host: &str) -> bool {
     if host != hostname() {
@@ -74,13 +79,14 @@ pub fn pid_alive(pid: u32, host: &str) -> bool {
     #[cfg(unix)]
     {
         match Command::new("sh")
-            .args(["-c", r#"kill -0 "$1" 2>/dev/null"#, "sh", &pid.to_string()])
+            .args(["-c", r#"kill -0 "$1" 2>&1"#, "sh", &pid.to_string()])
             .stdin(Stdio::null())
-            .stdout(Stdio::null())
             .stderr(Stdio::null())
-            .status()
+            .output()
         {
-            Ok(status) => status.success(),
+            Ok(out) => {
+                kill_probe_alive(out.status.success(), &String::from_utf8_lossy(&out.stdout))
+            }
             Err(_) => true,
         }
     }

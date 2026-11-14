@@ -37,8 +37,8 @@ pub enum Command {
     Env(EnvArgs),
     /// Remove finished tasks (merged, clean, ready)
     Gc(GcArgs),
-    /// Check berth's state against git and the machine
-    Doctor,
+    /// Check berth's state against git and the machine; `--fix` repairs what a crash left
+    Doctor(DoctorArgs),
     /// Handle a Claude Code hook event (JSON on stdin; see docs/integration.md)
     Hook(HookArgs),
 }
@@ -51,10 +51,17 @@ impl Command {
             Command::Ls => "ls",
             Command::Env(_) => "env",
             Command::Gc(_) => "gc",
-            Command::Doctor => "doctor",
+            Command::Doctor(_) => "doctor",
             Command::Hook(_) => "hook",
         }
     }
+}
+
+#[derive(Debug, Args)]
+pub struct DoctorArgs {
+    /// Remove interrupted or deleted tasks and stale port blocks, then re-check
+    #[arg(long)]
+    pub fix: bool,
 }
 
 #[derive(Debug, Args)]

@@ -348,8 +348,23 @@ impl Default for CacheCfg {
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 #[serde(deny_unknown_fields, default)]
 pub struct HookCfg {
+    #[serde(deserialize_with = "one_or_many")]
     pub run: Vec<String>,
     pub timeout_secs: u64,
+}
+
+/// `run = "cmd"` and `run = ["cmd", ...]` both work: one string is a list of one.
+fn one_or_many<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<String>, D::Error> {
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum OneOrMany {
+        One(String),
+        Many(Vec<String>),
+    }
+    Ok(match OneOrMany::deserialize(d)? {
+        OneOrMany::One(s) => vec![s],
+        OneOrMany::Many(v) => v,
+    })
 }
 
 impl Default for HookCfg {

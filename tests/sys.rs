@@ -90,3 +90,19 @@ fn path_within_folds_case_only_when_asked() {
         false
     ));
 }
+
+#[test]
+fn kill_probe_reads_permission_denied_as_alive() {
+    use berth::sys::kill_probe_alive;
+    assert!(kill_probe_alive(true, ""));
+    assert!(kill_probe_alive(
+        false,
+        "sh: 1: kill: Operation not permitted"
+    ));
+    assert!(kill_probe_alive(
+        false,
+        "kill: (1) - Operation not permitted"
+    ));
+    assert!(!kill_probe_alive(false, "sh: 1: kill: No such process"));
+    assert!(!kill_probe_alive(false, ""));
+}

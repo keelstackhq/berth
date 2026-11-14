@@ -49,7 +49,7 @@ pub(super) fn repo_lock(repo: &Repo) -> Result<LockGuard, BerthError> {
     lock::acquire(&lock::repo_lock(&repo.common_dir), lock::lock_timeout())
 }
 
-pub(super) fn user_lock(state: &Path) -> Result<LockGuard, BerthError> {
+pub(crate) fn user_lock(state: &Path) -> Result<LockGuard, BerthError> {
     lock::acquire(&lock::user_lock(state), lock::lock_timeout())
 }
 
@@ -86,6 +86,12 @@ pub(super) fn ports_item(block: &PortBlock, action: Action) -> Item {
 }
 
 pub fn up(ctx: &Ctx, args: &UpArgs) -> Result<Report, BerthError> {
+    up_once(ctx, args, true)
+}
+
+/// `heal`: an entry left `creating` by a dead `up` is removed (`down --force`) and created anew,
+/// once. The old worktree was never ready, so nothing of value is lost.
+fn up_once(ctx: &Ctx, args: &UpArgs, heal: bool) -> Result<Report, BerthError> {
     let repo = &ctx.repo;
     let main = &repo.main;
     let task = args.task.as_str();
@@ -128,6 +134,17 @@ pub fn up(ctx: &Ctx, args: &UpArgs) -> Result<Report, BerthError> {
     // 3. An existing entry is confirmed or reported; otherwise check before creating anything.
     let mut manifest = Manifest::load(main)?;
     if let Some(entry) = manifest.find(task) {
+        if heal
+            && entry.state == State::Creating
+            && !sys::pid_alive(entry.owner.pid, &entry.owner.host)
+        {
+            drop(repo_guard);
+            let down = super::down::down_task(ctx, task, true, false)?;
+            if down.exit_code != 0 {
+                return Ok(down);
+            }
+            return up_once(ctx, args, false);
+        }
         return existing(entry, args, &cfg, repo, &base_sha);
     }
     let mut refused = Vec::new();

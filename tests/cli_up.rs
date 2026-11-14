@@ -785,3 +785,23 @@ fn tracked_manifest_is_refused() {
     assert!(!wt(&fx, "b").exists());
     assert_eq!(manifest_entries(&fx).len(), 1);
 }
+
+#[test]
+fn up_resumes_an_interrupted_task() {
+    let fx = Fixture::new();
+    fx.config(&fx.repo, "", "");
+    assert_eq!(up(&fx, &["a"]).status.code(), Some(0));
+    let mut child = std::process::Command::new("true").spawn().unwrap();
+    let pid = child.id();
+    child.wait().unwrap();
+    let path = fx.repo.join(".agents/worktrees.json");
+    let mut m: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    m["worktrees"][0]["state"] = "creating".into();
+    m["worktrees"][0]["owner"]["pid"] = pid.into();
+    fs::write(&path, serde_json::to_vec(&m).unwrap()).unwrap();
+    let out = up(&fx, &["a", "--json"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    let v: Value = serde_json::from_str(&stdout(&out)).unwrap();
+    assert_eq!(v["worktrees"][0]["state"], "ready", "{v}");
+    assert!(wt(&fx, "a").exists());
+}
