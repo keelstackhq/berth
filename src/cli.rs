@@ -162,6 +162,10 @@ impl FromStr for Task {
 
 /// A valid slug close to `s` (lowercase, runs of other characters become one `-`), if any.
 fn suggest(s: &str) -> Option<String> {
+    // Dropping non-ASCII characters would suggest a different word, not a fix.
+    if !s.is_ascii() {
+        return None;
+    }
     let mut out = String::new();
     for c in s.to_ascii_lowercase().chars() {
         if c.is_ascii_lowercase() || c.is_ascii_digit() {
@@ -184,6 +188,7 @@ mod tests {
         let err = |s: &str| s.parse::<Task>().unwrap_err();
         assert!(err("Fix Login").ends_with("; try `fix-login`"));
         assert!(err("feature/x_y").ends_with("; try `feature-x-y`"));
+        assert!(!err("café").contains("try"));
         assert!(err("---").ends_with("starting with a letter or digit"));
     }
 

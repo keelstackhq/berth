@@ -74,6 +74,9 @@ pub(crate) fn down_task(
         }
     }
 
+    // Windows cannot delete a directory that is some process's cwd, ours included.
+    leave(main, &path);
+
     // Only a registered linked worktree is berth's to inspect, run hooks in or remove.
     let registered = is_registered_worktree(main, &path)?;
 
@@ -245,6 +248,17 @@ fn refused(items: Vec<Item>, entry: &Entry) -> Report {
 }
 
 /// True when `path` is a linked worktree git knows about (never the main checkout).
+/// Move this process out of `worktree` (to the main checkout) so removing it cannot fail on
+/// a held cwd. Does nothing when the cwd is elsewhere.
+fn leave(main: &Path, worktree: &Path) {
+    let canon = |p: &Path| sys::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
+    if let Ok(cwd) = std::env::current_dir()
+        && canon(&cwd).starts_with(canon(worktree))
+    {
+        let _ = std::env::set_current_dir(main);
+    }
+}
+
 pub(crate) fn is_registered_worktree(main: &Path, path: &Path) -> Result<bool, BerthError> {
     let want = crate::sys::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
     if want == main {
