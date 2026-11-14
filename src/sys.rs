@@ -71,6 +71,19 @@ pub fn kill_probe_alive(success: bool, output: &str) -> bool {
     success || output.to_ascii_lowercase().contains("not permitted")
 }
 
+/// `kill -0 <pid>` with stderr folded into stdout. `LC_ALL=C` keeps the EPERM text English so
+/// `kill_probe_alive` can read it under any locale.
+#[cfg(unix)]
+pub fn kill_probe_command(pid: u32) -> Command {
+    let mut cmd = Command::new("sh");
+    cmd.args(["-c", r#"kill -0 "$1" 2>&1"#, "sh", &pid.to_string()])
+        .env("LC_ALL", "C")
+        .env_remove("LANGUAGE")
+        .stdin(Stdio::null())
+        .stderr(Stdio::null());
+    cmd
+}
+
 /// Whether `pid` on `host` may still be running. Another host: assume yes. Spawn error: assume yes.
 pub fn pid_alive(pid: u32, host: &str) -> bool {
     if host != hostname() {
@@ -78,12 +91,7 @@ pub fn pid_alive(pid: u32, host: &str) -> bool {
     }
     #[cfg(unix)]
     {
-        match Command::new("sh")
-            .args(["-c", r#"kill -0 "$1" 2>&1"#, "sh", &pid.to_string()])
-            .stdin(Stdio::null())
-            .stderr(Stdio::null())
-            .output()
-        {
+        match kill_probe_command(pid).output() {
             Ok(out) => {
                 kill_probe_alive(out.status.success(), &String::from_utf8_lossy(&out.stdout))
             }

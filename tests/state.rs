@@ -345,3 +345,22 @@ fn entry_with_db_round_trips() {
     assert_eq!(text.matches("\"user\"").count(), 0, "{text}");
     assert_eq!(Manifest::load(main).unwrap(), m);
 }
+
+#[cfg(unix)]
+#[test]
+fn kill_probe_forces_the_c_locale() {
+    let cmd = berth::sys::kill_probe_command(1);
+    let env: Vec<_> = cmd.get_envs().collect();
+    use std::ffi::OsStr;
+    assert!(env.contains(&(OsStr::new("LC_ALL"), Some(OsStr::new("C")))));
+    assert!(env.contains(&(OsStr::new("LANGUAGE"), None)));
+    // A translated EPERM text is not recognised, which is why the locale is forced.
+    assert!(!berth::sys::kill_probe_alive(
+        false,
+        "Operation nicht erlaubt"
+    ));
+    assert!(berth::sys::kill_probe_alive(
+        false,
+        "Operation not permitted"
+    ));
+}

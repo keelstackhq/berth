@@ -36,3 +36,11 @@ tempfile = "=3.27.0"
 # Faster CI builds; backtraces keep line numbers.
 [profile.dev]
 debug = "line-tables-only"
+
+# Smaller binary, shorter link; the CLI is not CPU-bound.
+[profile.release]
+opt-level = "s"
+lto = "thin"
+codegen-units = 1
+panic = "abort"
+strip = true

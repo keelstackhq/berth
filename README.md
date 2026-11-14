@@ -8,8 +8,6 @@ hook, and `berth down <task>` cleans up. One static Rust binary, part of the kee
 
 ## Install
 
-Released builds (see `docs/releasing.md`):
-
 ```bash
 npm i -g @keelstackhq/berth     # launcher; the binary comes from a platform package
 cargo install keel-berth        # installs the binary `berth`
@@ -157,7 +155,8 @@ The cross-tool exit-code table is org decision
   reports a `creating` entry owned by another host as drift ("cannot verify"). `down` refuses
   it too; if that `up` is gone, `berth down --force <task>` removes it. A live `up` on this host
   always refuses `down`, even with `--force`.
-- berth never edits tracked files. The lines it adds to `.git/info/exclude` stay after
-  `down`; they are harmless.
+- berth never edits tracked files. Its `.git/info/exclude` lines stay after `down`.
+- A corrupt `worktrees.json` or `ports.json` is exit 3 with a one-line fix. berth never rewrites
+  it, so no record is lost: restore the file, or delete it only when you accept losing records.
 - A repo whose `.gitignore` lacks `.turbo/` or `target/` will see `down` refuse after builds
   (the worktree is dirty). Add them to `.gitignore` or use `--force`.

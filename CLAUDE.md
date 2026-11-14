@@ -70,6 +70,7 @@ Run the fast checks before every commit.
 - `git check-ignore` exits 1 when nothing is ignored; that is not an error.
 - `info/exclude` lives in the common git dir and applies to every worktree.
 - flock conflicts across file descriptors even inside one process.
+- `kill -0` runs with `LC_ALL=C`: the EPERM text must stay English to count as alive.
 - The package is `keel-berth`; the binary and the lib are `berth`.
 
 <!-- splice:decisions:begin — managed by `splice update --channel decisions`; edit the source -->
