@@ -227,8 +227,16 @@ fn release_workflow_is_gated_so_a_merge_publishes_nothing() {
     let build = job(&text, "build");
     assert!(build.contains("workflow_dispatch") && build.contains("enabled == 'true'"));
     // Decision 3: hoist from npm, exact version, in both writing jobs; GH_TOKEN never meets cargo.
+    assert_eq!(text.matches("  HOIST_VERSION: ").count(), 1, "one pin");
+    assert!(text.contains("  HOIST_VERSION: 0.4.1\n"), "exact version");
     assert_eq!(
-        text.matches("npm install -g @keelstackhq/hoist@0.2.0")
+        text.matches("npm install -g @keelstackhq/hoist@${{ env.HOIST_VERSION }}")
+            .count(),
+        2
+    );
+    assert_eq!(text.matches("uses: actions/setup-node@").count(), 2);
+    assert_eq!(
+        text.matches("node-version: ${{ env.NODE_VERSION }}")
             .count(),
         2
     );

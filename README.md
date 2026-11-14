@@ -3,7 +3,7 @@
 berth gives each parallel coding agent an isolated, ready workspace in a git repo: `berth up
 <task>` creates a worktree, copies local env files, reserves a block of ports and runs your setup
 hook, and `berth down <task>` cleans up. One static Rust binary, part of the keelstackhq family
-(hull, splice, hoard, hoist). Status: M1 (local use, built from source). Design:
+(hull, splice, hoard, hoist, berth, bosun). Status: M1 (local use, built from source). Design:
 `docs/superpowers/specs/2026-10-17-berth-design.md`.
 
 ## Install
@@ -132,7 +132,8 @@ url = "postgres://postgres@localhost:{port.db}/app"   # optional
 `0` ok · `1` refused or drift (also: a `[db]` sqlite target git does not ignore, `gc` when a
 `down` refused) · `2` usage · `3` config or environment error (the message says how to fix it;
 also: missing `createdb`/`dropdb`/`docker`, a failed database step). With `--json`, stdout is exactly one object
-`{version, command, ok, exit_code, items, worktrees}`; logs and hook output go to stderr.
+`{version, command, ok, exit_code, items, worktrees}`; logs and hook output go to stderr. The cross-tool exit-code table is org decision D-020
+(see [org decisions](docs/agents/org-decisions.md)).
 
 ## Environment variables
 
