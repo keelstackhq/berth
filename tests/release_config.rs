@@ -164,7 +164,10 @@ fn pnpm_workspace_lists_the_npm_packages() {
 }
 
 fn workflow(name: &str) -> String {
-    fs::read_to_string(root().join(".github/workflows").join(name)).unwrap()
+    // A Windows checkout may convert line endings (autocrlf); the checks below match on `\n`.
+    fs::read_to_string(root().join(".github/workflows").join(name))
+        .unwrap()
+        .replace("\r\n", "\n")
 }
 
 /// The text of one top-level job: from `  <name>:` up to the next two-space-indented key.
