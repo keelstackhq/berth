@@ -132,8 +132,10 @@ url = "postgres://postgres@localhost:{port.db}/app"   # optional
 `0` ok · `1` refused or drift (also: a `[db]` sqlite target git does not ignore, `gc` when a
 `down` refused) · `2` usage · `3` config or environment error (the message says how to fix it;
 also: missing `createdb`/`dropdb`/`docker`, a failed database step). With `--json`, stdout is exactly one object
-`{version, command, ok, exit_code, items, worktrees}`; logs and hook output go to stderr. The cross-tool exit-code table is org decision D-020
-(see [org decisions](docs/agents/org-decisions.md)).
+`{version, command, ok, exit_code, items, worktrees}`; logs and hook output go to stderr.
+
+The cross-tool exit-code table is org decision
+[D-020](https://github.com/keelstackhq/decisions/blob/main/decisions/020-exit-codes.md).
 
 ## Environment variables
 
