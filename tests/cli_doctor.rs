@@ -683,13 +683,12 @@ fn down_records_itself_as_owner_while_removing() {
     let path = fx.repo.join(".agents/worktrees.json");
     let mut owner = None;
     for _ in 0..80 {
-        if let Ok(b) = fs::read(&path) {
-            if let Ok(m) = serde_json::from_slice::<Value>(&b) {
-                if m["worktrees"][0]["state"] == "removing" {
-                    owner = Some(m["worktrees"][0]["owner"]["pid"].as_u64().unwrap());
-                    break;
-                }
-            }
+        let m = fs::read(&path)
+            .ok()
+            .and_then(|b| serde_json::from_slice::<Value>(&b).ok());
+        if let Some(m) = m.filter(|m| m["worktrees"][0]["state"] == "removing") {
+            owner = Some(m["worktrees"][0]["owner"]["pid"].as_u64().unwrap());
+            break;
         }
         std::thread::sleep(std::time::Duration::from_millis(50));
     }
