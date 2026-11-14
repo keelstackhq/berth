@@ -65,3 +65,28 @@ fn strip_verbatim_drops_the_win32_prefix_git_cannot_use() {
     );
     assert_eq!(strip_verbatim(r"\\?\C:"), r"\\?\C:");
 }
+
+#[test]
+fn path_within_folds_case_only_when_asked() {
+    use berth::sys::path_within_with;
+    use std::path::Path;
+    let (a, b) = (Path::new("/Work/Repo/wt/sub"), Path::new("/work/repo/WT"));
+    assert!(path_within_with(a, b, true));
+    assert!(!path_within_with(a, b, false));
+    assert!(path_within_with(
+        Path::new("/r/wt/x"),
+        Path::new("/r/wt"),
+        false
+    ));
+    // a shared name prefix is not containment
+    assert!(!path_within_with(
+        Path::new("/r/wt-other"),
+        Path::new("/r/wt"),
+        true
+    ));
+    assert!(path_within_with(
+        Path::new("/r/wt"),
+        Path::new("/r/wt"),
+        false
+    ));
+}

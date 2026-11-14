@@ -303,6 +303,9 @@ never exported: they stay in `.env`, read by the app's own loader.
    someone else's). The setup hook (step 7) sees `$DATABASE_URL` and the other §7 variables.
 7. Run `[setup].run` in the worktree with the §7 env, output → stderr, with the timeout
    (`--no-setup` skips it).
+   Windows path hazards: worktree paths compare case-insensitively (`sys::path_within`), every git
+   call runs with `-c core.longpaths=true`, and `down` first moves its own cwd to the main checkout
+   (a held cwd blocks removal).
    Hooks are POSIX `sh -c` commands on every OS. On Windows berth uses `sh.exe` from `PATH`, else
    Git for Windows' (`<prefix>\bin\sh.exe` or `<prefix>\usr\bin\sh.exe`, derived from
    `git --exec-path`); none found is exit 3 ("install Git for Windows"). Each hook runs in its

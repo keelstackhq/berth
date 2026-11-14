@@ -46,7 +46,12 @@ pub(crate) fn down_task(
         report.items.push(if freed > 0 {
             Item::new("ports", task, Action::Remove, "released an orphaned block")
         } else {
-            Item::new("worktree", task, Action::Ok, "no such task")
+            Item::new(
+                "worktree",
+                task,
+                Action::Ok,
+                "no such task; nothing to remove (see berth ls)",
+            )
         });
         return Ok(report);
     };
@@ -247,25 +252,25 @@ fn refused(items: Vec<Item>, entry: &Entry) -> Report {
     report
 }
 
-/// True when `path` is a linked worktree git knows about (never the main checkout).
 /// Move this process out of `worktree` (to the main checkout) so removing it cannot fail on
 /// a held cwd. Does nothing when the cwd is elsewhere.
-fn leave(main: &Path, worktree: &Path) {
+pub fn leave(main: &Path, worktree: &Path) {
     let canon = |p: &Path| sys::canonicalize(p).unwrap_or_else(|_| p.to_path_buf());
     if let Ok(cwd) = std::env::current_dir()
-        && canon(&cwd).starts_with(canon(worktree))
+        && crate::sys::path_within(&canon(&cwd), &canon(worktree))
     {
         let _ = std::env::set_current_dir(main);
     }
 }
 
+/// True when `path` is a linked worktree git knows about (never the main checkout).
 pub(crate) fn is_registered_worktree(main: &Path, path: &Path) -> Result<bool, BerthError> {
     let want = crate::sys::canonicalize(path).unwrap_or_else(|_| path.to_path_buf());
-    if want == main {
+    if crate::sys::path_within(&want, main) && crate::sys::path_within(main, &want) {
         return Ok(false);
     }
     Ok(git::worktree_list(main)?.iter().any(|w| {
         let have = crate::sys::canonicalize(&w.path).unwrap_or_else(|_| w.path.clone());
-        have == want
+        crate::sys::path_within(&have, &want) && crate::sys::path_within(&want, &have)
     }))
 }

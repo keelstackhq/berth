@@ -159,6 +159,25 @@ pub fn canonicalize(path: impl AsRef<std::path::Path>) -> std::io::Result<PathBu
     Ok(real)
 }
 
+/// True when `path` is `base` or inside it. Windows paths compare case-insensitively (NTFS keeps
+/// the case it was given, and a path that no longer exists cannot be canonicalized to the real one).
+pub fn path_within(path: &std::path::Path, base: &std::path::Path) -> bool {
+    path_within_with(path, base, cfg!(windows))
+}
+
+/// [`path_within`] with the case folding chosen by the caller. Pure, any OS.
+pub fn path_within_with(path: &std::path::Path, base: &std::path::Path, fold: bool) -> bool {
+    if !fold {
+        return path.starts_with(base);
+    }
+    let lower = |p: &std::path::Path| {
+        p.components()
+            .map(|c| c.as_os_str().to_string_lossy().to_lowercase())
+            .collect::<Vec<_>>()
+    };
+    lower(path).starts_with(&lower(base))
+}
+
 /// The plain form of a verbatim Windows path (see [`canonicalize`]); anything else, and verbatim
 /// paths with no plain form (`\\?\Volume{..}`, a bare drive), unchanged. Pure, any OS.
 pub fn strip_verbatim(path: &str) -> String {

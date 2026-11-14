@@ -13,17 +13,16 @@ or a second clone, and never start a dev server on a fixed port.
 
 - **Start a task:** `berth up <task> --json`. `<task>` is a slug (`fix-login`: `a-z`, `0-9`, `-`, max 48).
   Calling it again on a healthy task is safe and returns `ok`.
-- **Get the environment** (ports, cache dirs, database URL) in the current shell:
-  `eval "$(berth env)"` from inside the worktree, or `berth env <task>`. Formats:
-  `--format sh|fish|dotenv|json`. Skip this when your session already exports it
-  (`echo $BERTH_TASK` is set).
-- **See what exists:** `berth ls` (state, ahead/behind, dirty, listening ports).
+- **Get the environment** in the current shell: `eval "$(berth env)"` inside the worktree, or
+  `berth env <task>` (`--format sh|fish|dotenv|json`). Skip it when `$BERTH_TASK` is set.
+- **See what exists:** `berth ls` (state, ahead/behind, dirty; ports show only while something listens).
 - **Finish a task:** commit your work, then `berth down` (inside the worktree) or
-  `berth down <task>`. It refuses a dirty worktree and
-  keeps the branch. Add `--delete-branch` only after the branch is merged.
-- **Clean up after merges:** `berth gc --dry-run`, then `berth gc` removes merged, clean,
-  ready tasks.
-- **Something looks off:** `berth doctor`.
+  `berth down <task>`. It refuses a dirty worktree (untracked files count: `git add` and commit
+  them; `--force` discards them) and keeps the branch. Add `--delete-branch` only after the
+  branch is merged. Run from inside the worktree, it removes your cwd: `cd` to the main checkout
+  afterwards. `down` of an unknown task exits 0 with `no such task`: check the name with `berth ls`.
+- **Clean up after merges:** `berth gc --dry-run`, then `berth gc` (merged, clean, ready tasks).
+  **Something looks off:** `berth doctor`.
 
 ## Reading `berth up <task> --json`
 
@@ -33,7 +32,7 @@ stdout is exactly one JSON object:
 - `worktrees[0].path`: absolute path of the worktree. Work (and run tools) there.
 - `worktrees[0].branch` (`berth/<task>` by default) and `.ports`:
   `{ "start", "end", "named": { "web": 21170, ... } }`.
-- `worktrees[0].env`: the variables to use: `PORT` (first port), `<NAME>_PORT` per named port,
+- `worktrees[0].env`: the variables to use: `PORT` (first port), `<NAME>_PORT` per named port (default names `web` `api` `db` `storybook`; `berth.toml` sets them),
   `BERTH_TASK`, `BERTH_WORKTREE`, `BERTH_ROOT`, `TURBO_CACHE_DIR`, `CARGO_TARGET_DIR`, `TMPDIR`,
   and `DATABASE_URL` when the repo configures a database.
 - `items`: one entry per step, each `{ kind, key, action, reason }` with action `create`, `ok`,
@@ -57,4 +56,5 @@ stdout is exactly one JSON object:
   (`vite --port "$WEB_PORT"`) and to test runners.
 - **Stay inside your worktree**; never touch the main checkout or another task's directory, and
   never edit `.agents/worktrees.json` or `berth.toml` to change your allocation.
-- Logs, git output and setup-hook output go to stderr; parse stdout only.
+- With `--json`, errors still print one JSON object on stdout (`ok:false`, reason in `items`).
+- Logs, git and hook output go to stderr; parse stdout only.
