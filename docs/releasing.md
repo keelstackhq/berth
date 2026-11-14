@@ -40,7 +40,7 @@ Dry run any time: Actions -> release -> Run workflow (on a branch or on `main`).
 
 Done for `v0.1.0` (2026-10-22); kept as the record of how the first release was set up.
 
-1. **hoist on npm.** `publish` and `prepare` install exactly `@keelstackhq/hoist@0.2.0`. Use
+1. **hoist on npm.** `publish` and `prepare` install exactly `@keelstackhq/hoist@0.4.1` (`HOIST_VERSION` in `release.yml`). Use
    0.2.0 or later: 0.1.0's post-publish npm check waits only about 8 s, so the `v0.1.0` publish
    job went red although every package was published; 0.2.0 waits up to 5 min.
 2. **GitHub environment `release`** on `keelstackhq/berth`, with a deployment branch/tag policy

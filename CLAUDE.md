@@ -2,7 +2,7 @@
 
 Give each parallel coding agent an isolated, ready workspace in a git repo: `berth up <task>`
 makes a worktree, copies local env files, reserves a port block and runs setup. One static Rust
-binary. Part of the keelstackhq family (hull, splice, hoard, hoist).
+binary. Part of the keelstackhq family (hull, splice, hoard, hoist, berth, bosun).
 
 - Spec: `docs/superpowers/specs/2026-10-17-berth-design.md` — source of truth. Read only the
   section you touch (§3 CLI, §4 config, §6 manifest, §8 up, §9 ports); update it in the same
