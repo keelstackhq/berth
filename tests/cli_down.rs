@@ -505,3 +505,28 @@ fn force_still_refuses_a_live_owner_on_this_host() {
     assert!(wt(&fx, "a").is_dir());
     assert_eq!(manifest_entries(&fx)[0]["state"], "creating");
 }
+
+#[test]
+fn down_without_task_uses_the_worktree_of_the_cwd() {
+    let fx = Fixture::new();
+    fx.config(&fx.repo, "", "");
+    assert_eq!(code(&up(&fx, &["a"])), 0);
+    assert_eq!(code(&up(&fx, &["b"])), 0);
+    // Outside any worktree: usage error, one JSON object, nothing removed.
+    let out = down(&fx, &["--json"]);
+    assert_eq!(code(&out), 2, "{}", stderr(&out));
+    assert_eq!(json(&out)["items"][0]["key"], "usage");
+    assert_eq!(manifest_entries(&fx).len(), 2);
+    // Inside `a`: removes `a` only.
+    let out = fx
+        .berth()
+        .current_dir(wt(&fx, "a"))
+        .args(["down", "--json"])
+        .output()
+        .expect("run berth");
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    assert_eq!(json(&out)["items"][0]["key"], "a");
+    assert!(!wt(&fx, "a").exists());
+    assert!(wt(&fx, "b").exists());
+    assert_eq!(manifest_entries(&fx).len(), 1);
+}

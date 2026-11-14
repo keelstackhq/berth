@@ -6,7 +6,7 @@ use crate::cache;
 use crate::cli::{EnvArgs, Format};
 use crate::config;
 use crate::env::{format_env, format_env_hoard};
-use crate::manifest::Manifest;
+use crate::manifest::{Entry, Manifest};
 use crate::report::Report;
 use crate::{BerthError, Ctx};
 
@@ -19,16 +19,7 @@ pub fn env(ctx: &Ctx, args: &EnvArgs) -> Result<Report, BerthError> {
                 BerthError::Env(format!("no berth task `{task}`; run berth up {task}"))
             })?
         }
-        None => {
-            let here = canon(&ctx.dir);
-            manifest
-                .worktrees
-                .iter()
-                .find(|e| here.starts_with(canon(&e.path)))
-                .ok_or_else(|| {
-                    BerthError::Usage("not inside a berth worktree; pass <task>".into())
-                })?
-        }
+        None => cwd_entry(ctx, &manifest)?,
     };
     let mut report = Report::new("env");
     // A broken berth.toml must not hide the recorded environment: only hoard needs the config.
@@ -57,4 +48,14 @@ pub fn env(ctx: &Ctx, args: &EnvArgs) -> Result<Report, BerthError> {
 
 fn canon(path: &std::path::Path) -> PathBuf {
     crate::sys::canonicalize(path).unwrap_or_else(|_| path.to_path_buf())
+}
+
+/// The entry whose worktree contains the cwd, else a usage error (shared with `down`).
+pub(crate) fn cwd_entry<'a>(ctx: &Ctx, manifest: &'a Manifest) -> Result<&'a Entry, BerthError> {
+    let here = canon(&ctx.dir);
+    manifest
+        .worktrees
+        .iter()
+        .find(|e| here.starts_with(canon(&e.path)))
+        .ok_or_else(|| BerthError::Usage("not inside a berth worktree; pass <task>".into()))
 }

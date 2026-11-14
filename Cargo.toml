@@ -32,3 +32,7 @@ assert_cmd = "=2.2.2"
 insta = { version = "=1.49.0", features = ["json", "filters"] }
 predicates = "=3.1.4"
 tempfile = "=3.27.0"
+
+# Faster CI builds; backtraces keep line numbers.
+[profile.dev]
+debug = "line-tables-only"
