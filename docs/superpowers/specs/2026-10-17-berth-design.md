@@ -55,7 +55,7 @@ berth down [<task>] [--force] [--delete-branch] [--json]   task defaults to the 
 berth ls [--json]
 berth env [<task>] [--format sh|fish|pwsh|dotenv|json]   task defaults to the worktree of the cwd
 berth gc [--dry-run] [--delete-branch] [--json]
-berth doctor [--json]
+berth doctor [--fix] [--json]
 berth hook worktree-create|worktree-remove|session-start|statusline   JSON payload on stdin
 ```
 
@@ -163,7 +163,7 @@ turbo_seed = "off"              # "off" | "link" | "copy": seed .turbo/cache fro
 remote = "none"                 # "none" | "hoard": export a running `hoard serve` to the worktree
 hoard_dir = ".hoard"            # relative to the main checkout: holds hoard's port and token files
 
-[setup]                         # run in the new worktree, in order, after copy; stderr streamed
+[setup]                         # run (a string or a list) in the new worktree, in order, after copy; stderr streamed
 run = ["pnpm install --frozen-lockfile"]
 timeout_secs = 900              # [teardown] has the same keys; runs before removal
 ```
@@ -329,7 +329,9 @@ holder recorded in the sidecar `<lock>.holder` (`pid=… host=… cmd=…`, writ
 taken, emptied before release; a sidecar because Windows locks are mandatory and a second handle
 cannot read the locked file). Process liveness and hostname are per OS (Windows: `tasklist`,
 `COMPUTERNAME`). A `creating` entry whose owner pid is gone is shown by `ls`
-and `doctor` as `drift: interrupted`; `down` cleans it.
+and `doctor` as `drift: interrupted`. Running `up <task>` again removes it (`down --force`) and creates the
+task anew, once; `doctor --fix` removes it too. Locks need no cleanup: the OS frees a flock when
+the process dies, and the holder sidecar is overwritten by the next holder.
 
 ## 9. Port allocation
 
@@ -424,7 +426,10 @@ run). Removals run one after another in manifest order.
 `git worktree list` consistent; every manifest path exists; copy patterns ignored by git;
 manifest path ignored; worktree root not inside a tracked directory; stale registry entries;
 reserved ports re-probed; `creating` entries with dead owners. Exit 1 on any drift, 3 on errors.
-Lock-free and file-free like `ls`. Manifest, exclude, port and owner checks run only when
+Lock-free and file-free like `ls`, unless `--fix`: then it first repairs what a crash leaves (a
+`creating` entry with a dead owner, a `removing` entry, a `ready` entry whose directory is gone: each
+`down --force`; stale registry blocks of any repo: removed under the user lock), reports each as a
+`remove` item, and re-checks; exit 1 only for drift it could not fix. Without `--fix` it writes nothing. Manifest, exclude, port and owner checks run only when
 `.agents/worktrees.json` exists. A listening port is drift only when its task is not `ready` or
 its worktree directory is gone.
 With `[db]`: `db tools` is `drift` when `createdb`/`dropdb` (postgres) or `docker` (compose) is

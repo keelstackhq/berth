@@ -549,3 +549,74 @@ fn hoard_server_found_is_ok_and_absent_is_skipped_without_warning() {
     assert_eq!(item["action"], "ok");
     assert_eq!(item["reason"], "http://127.0.0.1:41234");
 }
+
+fn kill_owner(fx: &Fixture) {
+    let mut child = std::process::Command::new("true").spawn().unwrap();
+    let pid = child.id();
+    child.wait().unwrap();
+    let path = fx.repo.join(".agents/worktrees.json");
+    let mut m: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    m["worktrees"][0]["state"] = "creating".into();
+    m["worktrees"][0]["owner"]["pid"] = pid.into();
+    fs::write(&path, serde_json::to_vec_pretty(&m).unwrap()).unwrap();
+}
+
+#[test]
+fn doctor_fix_clears_interrupted_and_stale_state() {
+    let fx = Fixture::new();
+    fx.config(&fx.repo, "", "");
+    up(&fx, "a");
+    up(&fx, "b");
+    kill_owner(&fx); // `a` is now an interrupted up
+    fs::remove_dir_all(wt(&fx, "b")).unwrap(); // `b` lost its directory
+    let gone = fx.root.path().join("gone");
+    let ports = fx.state.join("ports.json");
+    let mut reg: Value = serde_json::from_slice(&fs::read(&ports).unwrap()).unwrap();
+    let used: Vec<u64> = reg["blocks"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|b| b["start"].as_u64().unwrap())
+        .collect();
+    let start = (0..)
+        .map(|i| u64::from(fx.range.0) + i * 10)
+        .find(|s| !used.contains(s))
+        .unwrap();
+    reg["blocks"]
+        .as_array_mut()
+        .unwrap()
+        .push(serde_json::json!({
+            "start": start, "end": start + 9, "repo": gone.display().to_string(),
+            "task": "t", "created_at": "2026-10-17T00:00:00Z"
+        }));
+    fs::write(&ports, serde_json::to_vec_pretty(&reg).unwrap()).unwrap();
+    assert_eq!(doctor(&fx).0, 1);
+
+    let out = berth(&fx, &["doctor", "--fix", "--json"]);
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(out.status.code(), Some(0), "{v} {}", stderr(&out));
+    let removed: Vec<&str> = v["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|i| i["action"] == "remove")
+        .map(|i| i["key"].as_str().unwrap())
+        .collect();
+    assert!(removed.contains(&"a") && removed.contains(&"b"), "{v}");
+    let (code, v) = doctor(&fx);
+    assert_eq!(code, 0, "{v}");
+    assert!(!wt(&fx, "a").exists());
+    // The slots are free again: both tasks come back.
+    up(&fx, "a");
+    up(&fx, "b");
+}
+
+#[test]
+fn doctor_fix_on_a_healthy_repo_changes_nothing() {
+    let fx = Fixture::new();
+    fx.config(&fx.repo, "", "");
+    up(&fx, "a");
+    let out = berth(&fx, &["doctor", "--fix", "--json"]);
+    assert_eq!(out.status.code(), Some(0), "{}", stderr(&out));
+    assert!(wt(&fx, "a").exists());
+}

@@ -353,3 +353,9 @@ fn cache_values_and_errors() {
     let text = err_text("[cache]\nremote = \"s3\"\n");
     assert!(text.contains("s3"), "{text}");
 }
+
+#[test]
+fn hook_run_accepts_one_string() {
+    let (_d, cfg) = load_toml("[setup]\nrun = \"pnpm install\"\n");
+    assert_eq!(cfg.unwrap().setup.run, vec!["pnpm install".to_string()]);
+}

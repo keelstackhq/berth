@@ -30,7 +30,7 @@ berth up <task> [--base REF] [--branch NAME] [--no-setup] [--keep-on-failure] [-
 berth down [<task>] [--force] [--delete-branch] [--json]
 berth ls [--json]
 berth env [<task>] [--format sh|fish|pwsh|dotenv|json]
-berth doctor [--json]
+berth doctor [--fix] [--json]
 berth gc [--dry-run] [--delete-branch] [--json]
 berth hook worktree-create|worktree-remove|session-start|statusline   (Claude Code; JSON on stdin)
 ```
@@ -51,7 +51,9 @@ to stderr, never file contents or env values). `<task>` is a slug `^[a-z0-9][a-z
   (PowerShell: `berth env --format pwsh | Out-String | Invoke-Expression`).
 - `doctor` checks git, config, copy rules, root, port registry, manifest and owners, plus the
   database tools, the sqlite template, turbo seeding and the hoard server when configured.
-  `ls`, `env` and `doctor` take no locks and write nothing.
+  `ls`, `env` and `doctor` take no locks and write nothing. After a crash (`kill -9` mid-`up`),
+  `berth up <task>` again, or `berth doctor --fix` for everything: it removes interrupted tasks and
+  stale port blocks.
 - `gc` runs `down` for every `ready` task whose worktree is clean and whose branch has commits
   that are all merged into `[worktree].base` (fast-forward, merge, or, with git 2.38+, squash or
   rebase). Fresh, dirty and unmerged tasks are kept. berth never fetches: `git pull` first.
@@ -79,7 +81,7 @@ version = 1
 [copy]      # include = [".env", ...], max_bytes = 1048576; files must be gitignored
 [ports]     # count = 10, range = [21000, 30999], names = { web = 0, api = 1, ... } -> WEB_PORT, ...
 [env]       # non-secret values; {repo} {task} {task_snake} {port.<name>} {port.base} {worktree}
-[setup]     # run = ["pnpm install --frozen-lockfile"], timeout_secs = 900
+[setup]     # run = "pnpm install --frozen-lockfile" (or a list), timeout_secs = 900
 [teardown]  # same keys as [setup]; runs before removal
 [db]        # provider = "sqlite" | "postgres" | "compose"; see below
 [cache]     # turbo_seed = "off" | "link" | "copy", remote = "none" | "hoard", hoard_dir = ".hoard"
