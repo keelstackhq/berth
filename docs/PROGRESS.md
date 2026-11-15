@@ -65,3 +65,4 @@ whole-branch review fixes done; PR #3.
   (`docs/integration.md`); that is hull's own milestone, not started here.
 - **Decisions row.** Propose in keelstackhq/decisions: per-task agent workspaces go through
   `berth`; `.agents/worktrees.json` (version 1) is the read contract for other tools.
+- 2026-11-15 · release v0.2.0 prepared · version 0.2.0 in `Cargo.toml`, `Cargo.lock`, six `npm/*/package.json` (+ launcher `optionalDependencies`), `pnpm-lock.yaml` (specifiers); no CHANGELOG or fragments in this repo · minor bump: `feat` crash recovery + `doctor --fix`, `down` cwd default; fmt, clippy -D warnings, `cargo test --locked` green; tag, publish left to owner
