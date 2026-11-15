@@ -1,6 +1,6 @@
 {
   "name": "@keelstackhq/berth",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Give each parallel coding agent an isolated, ready workspace in a git repo (npm launcher for the berth binary)",
   "license": "MIT",
   "repository": {
@@ -21,10 +21,10 @@
     "access": "public"
   },
   "optionalDependencies": {
-    "@keelstackhq/berth-linux-x64": "0.1.0",
-    "@keelstackhq/berth-linux-arm64": "0.1.0",
-    "@keelstackhq/berth-darwin-x64": "0.1.0",
-    "@keelstackhq/berth-darwin-arm64": "0.1.0",
-    "@keelstackhq/berth-win32-x64": "0.1.0"
+    "@keelstackhq/berth-linux-x64": "0.2.0",
+    "@keelstackhq/berth-linux-arm64": "0.2.0",
+    "@keelstackhq/berth-darwin-x64": "0.2.0",
+    "@keelstackhq/berth-darwin-arm64": "0.2.0",
+    "@keelstackhq/berth-win32-x64": "0.2.0"
   }
 }
