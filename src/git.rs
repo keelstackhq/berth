@@ -276,6 +276,21 @@ pub fn resolve_commit(main: &Path, rev: &str) -> Result<String, BerthError> {
         None,
     )?;
     if !out.status.success() {
+        let head = exec(
+            main,
+            &[
+                OsStr::new("rev-parse"),
+                OsStr::new("--verify"),
+                OsStr::new("--quiet"),
+                OsStr::new("HEAD^{commit}"),
+            ],
+            None,
+        )?;
+        if !head.status.success() {
+            return Err(BerthError::Env(
+                "the repo has no commits yet; make an initial commit, then run berth again".into(),
+            ));
+        }
         return Err(unknown());
     }
     Ok(text(&out.stdout))

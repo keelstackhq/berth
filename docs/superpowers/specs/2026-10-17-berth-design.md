@@ -70,7 +70,7 @@ copy-listed file git does not ignore, worktree limit reached, task being created
 invalid task slug, invalid `--branch`; clap usage errors exit 2) · `3` config or environment
 error (unknown `berth.toml` key, git missing or too old, unknown or `-`-prefixed `--base`: "unknown
 --base ref `<x>`; berth never fetches, run `git fetch` first", no free port block, lock timeout,
-setup hook failed, a `gc` removal that failed); the message says how to fix it.
+setup hook failed, a `gc` removal that failed; a repo with no commits: "the repo has no commits yet"; the task branch checked out in another worktree: git's message plus a hint to pick another task or `--branch`); the message says how to fix it.
 
 Justification: berth follows splice's scheme (0 ok · 1 refused/drift · 2 usage · 3 config or
 environment) because berth has no human steps, which is what hoist's `2` means. Agents only need
@@ -430,7 +430,7 @@ Lock-free and file-free like `ls`, unless `--fix`: then it first repairs what a 
 `creating` entry with a dead owner, a `removing` entry, a `ready` entry whose directory is gone: each
 `down --force`; stale registry blocks of any repo: removed under the user lock), reports each as a
 `remove` item; a live same-host owner is in progress (`down` records itself as owner of a `removing`
-entry), and an owner on another host is never removed (drift: `berth down --force <task>`), and re-checks; exit 1 only for drift it could not fix. Without `--fix` it writes nothing. Manifest, exclude, port and owner checks run only when
+entry), and an owner on another host is never removed (drift: `berth down --force <task>`), and re-checks; exit 1 only for drift it could not fix. A removal that fails (a locked worktree, say) is that task's `drift` item with git's reason, not an abort: the other repairs still run. Without `--fix` it writes nothing. Manifest, exclude, port and owner checks run only when
 `.agents/worktrees.json` exists. A listening port is drift only when its task is not `ready` or
 its worktree directory is gone.
 With `[db]`: `db tools` is `drift` when `createdb`/`dropdb` (postgres) or `docker` (compose) is

@@ -702,3 +702,38 @@ fn down_records_itself_as_owner_while_removing() {
     );
     child.wait().unwrap();
 }
+
+#[test]
+fn doctor_fix_reports_a_failed_repair_and_still_fixes_the_rest() {
+    let fx = Fixture::new();
+    fx.config(&fx.repo, "", "");
+    up(&fx, "a");
+    up(&fx, "b");
+    // `a` is an interrupted up whose worktree git refuses to remove (locked); `b` lost its directory.
+    set_entry(&fx, "creating", 4_000_000, &berth::sys::hostname());
+    git(
+        &fx.repo,
+        &["worktree", "lock", wt(&fx, "a").to_str().unwrap()],
+    );
+    fs::remove_dir_all(wt(&fx, "b")).unwrap();
+
+    let out = berth(&fx, &["doctor", "--fix", "--json"]);
+    let v: Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(out.status.code(), Some(1), "{v} {}", stderr(&out));
+    let item = |task: &str| {
+        v["items"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|i| i["kind"] == "worktree" && i["key"] == task)
+            .unwrap_or_else(|| panic!("no item for {task}: {v}"))
+            .clone()
+    };
+    assert_eq!(item("a")["action"], "drift", "{v}");
+    assert!(
+        item("a")["reason"].as_str().unwrap().contains("locked"),
+        "{v}"
+    );
+    assert_eq!(item("b")["action"], "remove", "{v}");
+    assert!(wt(&fx, "a").exists(), "the locked worktree was deleted");
+}
