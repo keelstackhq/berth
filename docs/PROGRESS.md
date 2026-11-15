@@ -2,7 +2,7 @@
 
 ## Status
 
-Milestone 3 (distribution and integration), plan `docs/superpowers/plans/2026-10-22-berth-m3.md`: Tasks 1-11 done, all merged (PRs #5, #6, #7). **berth 0.1.0 is released** (2026-10-22): GitHub release `v0.1.0`, npm `@keelstackhq/berth` + 5 platform packages, crates.io `keel-berth`.
+**berth 0.2.0 is released** (crash recovery, `doctor --fix`, `down` cwd default). Milestone 3 (distribution and integration), plan `docs/superpowers/plans/2026-10-22-berth-m3.md`: Tasks 1-11 done, all merged (PRs #5, #6, #7). **berth 0.1.0 is released** (2026-10-22): GitHub release `v0.1.0`, npm `@keelstackhq/berth` + 5 platform packages, crates.io `keel-berth`.
 
 Milestone 1 merged to `main` (PR #1, 2026-10-18; decisions channel in PR #2, 2026-10-21). Milestone 2
 (services) complete, plan `docs/superpowers/plans/2026-10-21-berth-m2.md`: Tasks 1-11 and the
@@ -57,6 +57,8 @@ whole-branch review fixes done; PR #3.
 - 2026-11-14 · Improvement round 3 · `leave()` test, Windows hazards (case-insensitive path matching via `sys::path_within`, `core.longpaths=true` on every git call), SKILL.md dry-run fixes, `down` unknown-task reason, CI debuginfo off + concurrency + timeout · `cargo test --locked` green
 - 2026-11-14 · Improvement round 4 · crash recovery probed with `kill -9` mid-`up` (flock and holder sidecar recover by themselves; ports block and `creating` entry were left): `berth up <task>` now removes a dead-owner `creating` task and creates it anew, `berth doctor --fix` removes interrupted/`removing`/directory-less tasks and stale port blocks in one command (`remove` items, exit 1 only for drift it could not fix), `[setup]`/`[teardown]` `run` accepts a plain string; SKILL.md names the one recovery path; spec §3/§4/§8/§11 and README · 4 tests seen failing first, fmt, clippy, `cargo test --locked` green
 - 2026-11-14 · Improvement round 5 · `kill -0` probe runs with `LC_ALL=C` (translated EPERM text still counts as alive) with a test; `tests/robust.rs` truncates/corrupts `worktrees.json` and `ports.json` across every command: no panic, exit 3 one line, manifest never rewritten (passed, no code change needed); release profile (`opt-level=s`, thin LTO, 1 codegen unit, `panic=abort`, strip): binary 2.8 MB → 1.6 MB, build 16 s → 18 s; README/CLAUDE.md trim; no dead pub items found · fmt, clippy, `cargo test --locked` green
+- 2026-11-15 · release v0.2.0 prepared and released · version 0.2.0 in `Cargo.toml`, `Cargo.lock`, six `npm/*/package.json` (+ launcher `optionalDependencies`), `pnpm-lock.yaml` (specifiers); no CHANGELOG or fragments in this repo · minor bump: `feat` crash recovery + `doctor --fix`, `down` cwd default; fmt, clippy -D warnings, `cargo test --locked` green; tagged and published by the owner
+- 2026-11-15 · Improvement round 6 · rehearsed an existing repo (own `.env` files, tracked and unignored env refusals, pre-existing worktrees, monorepo setup, failing setup, detached HEAD, spaces in path, deleted worktree dir, locked worktree): `doctor --fix` no longer aborts on the first failed removal (task `drift` with git's reason, rest still fixed, exit 1); empty repo says "no commits yet" instead of "run git fetch"; busy branch gets a hint; abort paths of crash recovery tested · fmt, clippy, `cargo test --locked` green
 
 ## Blocked
 
@@ -65,4 +67,3 @@ whole-branch review fixes done; PR #3.
   (`docs/integration.md`); that is hull's own milestone, not started here.
 - **Decisions row.** Propose in keelstackhq/decisions: per-task agent workspaces go through
   `berth`; `.agents/worktrees.json` (version 1) is the read contract for other tools.
-- 2026-11-15 · release v0.2.0 prepared · version 0.2.0 in `Cargo.toml`, `Cargo.lock`, six `npm/*/package.json` (+ launcher `optionalDependencies`), `pnpm-lock.yaml` (specifiers); no CHANGELOG or fragments in this repo · minor bump: `feat` crash recovery + `doctor --fix`, `down` cwd default; fmt, clippy -D warnings, `cargo test --locked` green; tag, publish left to owner

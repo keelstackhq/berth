@@ -805,3 +805,75 @@ fn up_resumes_an_interrupted_task() {
     assert_eq!(v["worktrees"][0]["state"], "ready", "{v}");
     assert!(wt(&fx, "a").exists());
 }
+
+#[test]
+fn up_aborts_when_a_dead_creation_cannot_be_removed() {
+    let fx = Fixture::new();
+    fx.config(&fx.repo, "", "");
+    assert_eq!(up(&fx, &["a"]).status.code(), Some(0));
+    let mut child = std::process::Command::new("true").spawn().unwrap();
+    let pid = child.id();
+    child.wait().unwrap();
+    let path = fx.repo.join(".agents/worktrees.json");
+    let mut m: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+    m["worktrees"][0]["state"] = "creating".into();
+    m["worktrees"][0]["owner"]["pid"] = pid.into();
+    fs::write(&path, serde_json::to_vec(&m).unwrap()).unwrap();
+    git(
+        &fx.repo,
+        &["worktree", "lock", wt(&fx, "a").to_str().unwrap()],
+    );
+    let out = up(&fx, &["a"]);
+    assert_eq!(out.status.code(), Some(3), "{}", stderr(&out));
+    assert!(stderr(&out).contains("locked"), "{}", stderr(&out));
+    assert!(wt(&fx, "a").exists(), "the locked worktree was deleted");
+    // Not silently recreated or forgotten: the entry says what to do next.
+    let again = up(&fx, &["a"]);
+    assert_eq!(again.status.code(), Some(1), "{}", stderr(&again));
+    assert!(
+        stdout(&again).contains("berth down a"),
+        "{}",
+        stdout(&again)
+    );
+}
+
+#[test]
+fn up_names_the_worktree_that_holds_the_branch() {
+    let fx = Fixture::new();
+    fx.config(&fx.repo, "", "");
+    let other = fx.root.path().join("elsewhere");
+    git(
+        &fx.repo,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "berth/busy",
+            other.to_str().unwrap(),
+        ],
+    );
+    let out = up(&fx, &["busy"]);
+    assert_eq!(out.status.code(), Some(3), "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains("checked out in another worktree"),
+        "{}",
+        stderr(&out)
+    );
+    assert!(!wt(&fx, "busy").exists());
+    assert_eq!(manifest_entries(&fx).len(), 0);
+}
+
+#[test]
+fn up_in_a_repo_without_commits_says_so() {
+    let fx = Fixture::new();
+    let empty = fx.root.path().join("empty");
+    fs::create_dir_all(&empty).unwrap();
+    git(&empty, &["init", "-q"]);
+    let out = fx
+        .berth()
+        .args(["-C", empty.to_str().unwrap(), "up", "a"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(3), "{}", stderr(&out));
+    assert!(stderr(&out).contains("no commits yet"), "{}", stderr(&out));
+}

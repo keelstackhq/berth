@@ -148,16 +148,25 @@ fn repair(ctx: &Ctx) -> Result<Vec<Item>, BerthError> {
             }
         }
         for (task, why) in broken {
-            let report = crate::ops::down::down_task(ctx, &task, true, false)?;
-            let item = if report.exit_code == 0 {
-                Item::new("worktree", &task, Action::Remove, format!("{why}: removed"))
-            } else {
-                let reason = report
-                    .items
-                    .iter()
-                    .find(|i| i.action == Action::Refused)
-                    .map_or_else(|| why.to_string(), |i| i.reason.clone());
-                Item::new("worktree", &task, Action::Drift, reason)
+            // A failed removal (a locked worktree, say) is drift for that task; the rest still gets fixed.
+            let item = match crate::ops::down::down_task(ctx, &task, true, false) {
+                Ok(report) if report.exit_code == 0 => {
+                    Item::new("worktree", &task, Action::Remove, format!("{why}: removed"))
+                }
+                Ok(report) => {
+                    let reason = report
+                        .items
+                        .iter()
+                        .find(|i| i.action == Action::Refused)
+                        .map_or_else(|| why.to_string(), |i| i.reason.clone());
+                    Item::new("worktree", &task, Action::Drift, reason)
+                }
+                Err(err) => Item::new(
+                    "worktree",
+                    &task,
+                    Action::Drift,
+                    format!("{why}: not removed: {err}"),
+                ),
             };
             out.push(item);
         }

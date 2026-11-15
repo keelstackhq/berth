@@ -673,6 +673,15 @@ fn create_worktree(
         if root_created && let Some(root) = path.parent() {
             let _ = std::fs::remove_dir(root);
         }
+        if let BerthError::Git { .. } = &err
+            && let msg = err.to_string()
+            && (msg.contains("already used by worktree") || msg.contains("already checked out"))
+        {
+            return Err(BerthError::Env(format!(
+                "{err}\nhint: branch {branch} is checked out in another worktree; \
+                 pick another task name, pass --branch, or remove that worktree"
+            )));
+        }
         return Err(err);
     }
     let mut items = vec![branch_item];
