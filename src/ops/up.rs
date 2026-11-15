@@ -674,7 +674,8 @@ fn create_worktree(
             let _ = std::fs::remove_dir(root);
         }
         if let BerthError::Git { .. } = &err
-            && err.to_string().contains("already used by worktree")
+            && let msg = err.to_string()
+            && (msg.contains("already used by worktree") || msg.contains("already checked out"))
         {
             return Err(BerthError::Env(format!(
                 "{err}\nhint: branch {branch} is checked out in another worktree; \
