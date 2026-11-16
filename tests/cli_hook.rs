@@ -162,10 +162,30 @@ fn create_config_error_exits_3() {
 }
 
 #[test]
+fn create_name_with_slash_becomes_a_dashed_task() {
+    let fx = Fixture::new();
+    fx.config(&fx.repo, "", "");
+    let out = create(&fx, "feat/x");
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    assert_eq!(stdout(&out), format!("{}\n", wt(&fx, "feat-x").display()));
+    let tasks: Vec<String> = entries(&fx)
+        .iter()
+        .map(|e| e["task"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(tasks, ["feat-x"]);
+    assert!(!git(&fx.repo, &["branch", "--list", "berth/feat-x"]).is_empty());
+    // Same name again: idempotent, same path.
+    let again = create(&fx, "feat/x");
+    assert_eq!(code(&again), 0, "{}", stderr(&again));
+    assert_eq!(stdout(&again), stdout(&out));
+}
+
+#[test]
 fn create_bad_name_exits_2() {
     let fx = Fixture::new();
     fx.config(&fx.repo, "", "");
-    for name in ["Bold Oak", "a/b", "", "-x"] {
+    // `/` maps to `-`, then the slug rules apply: `.` and `..` can never reach a path.
+    for name in ["Bold Oak", "", "-x", "/x", "../x", "a/../b", "a/./b"] {
         let out = create(&fx, name);
         assert_eq!(code(&out), 2, "{name}: {}", stderr(&out));
         assert_eq!(stdout(&out), "");

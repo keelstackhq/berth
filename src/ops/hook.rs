@@ -91,7 +91,10 @@ fn log_report(report: &Report) {
 /// `berth up <name>` from `cwd`; stdout is the absolute worktree path and nothing else.
 fn worktree_create(cli: &Cli, payload: &Value) -> Result<i32, BerthError> {
     let cwd = required(payload, "cwd")?;
+    // Claude Code names may nest (`feat/x`); each `/` becomes `-`, then the slug rules apply,
+    // so `.`, `..` and empty segments are still refused.
     let task: Task = required(payload, "name")?
+        .replace('/', "-")
         .parse()
         .map_err(BerthError::Usage)?;
     let ctx = context(Path::new(cwd), cli)?;

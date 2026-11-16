@@ -63,6 +63,17 @@ fn text(bytes: &[u8]) -> String {
 
 /// Run `git -C <dir> <args>` and return the raw output whatever the exit status.
 fn exec(dir: &Path, args: &[&OsStr], stdin: Option<Vec<u8>>) -> Result<Output, BerthError> {
+    exec_in(dir, args, stdin, false)
+}
+
+/// `exec`; with `c_locale`, git runs under `LC_ALL=C LANG=C` so its messages stay English
+/// for callers that match on them.
+fn exec_in(
+    dir: &Path,
+    args: &[&OsStr],
+    stdin: Option<Vec<u8>>,
+    c_locale: bool,
+) -> Result<Output, BerthError> {
     let shown: Vec<String> = args
         .iter()
         .map(|a| a.to_string_lossy().into_owned())
@@ -84,6 +95,11 @@ fn exec(dir: &Path, args: &[&OsStr], stdin: Option<Vec<u8>>) -> Result<Output, B
         })
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
+    if c_locale {
+        cmd.env("LC_ALL", "C")
+            .env("LANG", "C")
+            .env_remove("LANGUAGE");
+    }
     let mut child = cmd.spawn().map_err(|e| {
         if e.kind() == ErrorKind::NotFound {
             missing_git()
@@ -126,7 +142,11 @@ fn run(dir: &Path, args: &[&str]) -> Result<Vec<u8>, BerthError> {
 }
 
 fn run_os(dir: &Path, args: &[&OsStr]) -> Result<Vec<u8>, BerthError> {
-    let out = exec(dir, args, None)?;
+    run_os_in(dir, args, false)
+}
+
+fn run_os_in(dir: &Path, args: &[&OsStr], c_locale: bool) -> Result<Vec<u8>, BerthError> {
+    let out = exec_in(dir, args, None, c_locale)?;
     if out.status.success() {
         Ok(out.stdout)
     } else {
@@ -350,7 +370,8 @@ pub fn worktree_add(
             ]);
         }
     }
-    run_os(main, &args).map(drop)
+    // `up` matches the busy-branch message, so it must not be translated.
+    run_os_in(main, &args, true).map(drop)
 }
 
 pub fn worktree_remove(main: &Path, path: &Path, force: bool) -> Result<(), BerthError> {

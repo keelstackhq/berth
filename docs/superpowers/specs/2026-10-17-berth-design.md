@@ -70,7 +70,7 @@ copy-listed file git does not ignore, worktree limit reached, task being created
 invalid task slug, invalid `--branch`; clap usage errors exit 2) · `3` config or environment
 error (unknown `berth.toml` key, git missing or too old, unknown or `-`-prefixed `--base`: "unknown
 --base ref `<x>`; berth never fetches, run `git fetch` first", no free port block, lock timeout,
-setup hook failed, a `gc` removal that failed; a repo with no commits: "the repo has no commits yet"; the task branch checked out in another worktree: git's message plus a hint to pick another task or `--branch`); the message says how to fix it.
+setup hook failed, a `gc` removal that failed; a repo with no commits: "the repo has no commits yet"; the task branch checked out in another worktree: git's message plus a hint to pick another task or `--branch`; that `git worktree add` runs with `LC_ALL=C LANG=C` so the match holds in any locale); the message says how to fix it.
 
 Justification: berth follows splice's scheme (0 ok · 1 refused/drift · 2 usage · 3 config or
 environment) because berth has no human steps, which is what hoist's `2` means. Agents only need
@@ -96,7 +96,9 @@ protocol, so `--json` is a usage error (exit 2), as are malformed JSON and a mis
 field (message on stderr). `-C` is ignored; the directory comes from the payload.
 - `worktree-create` (`cwd`, `name`): `berth -C <cwd> up <name>` with default flags. stdout is the
   absolute worktree path (no `.`/`..` segments) and a newline, nothing else; the table, logs and
-  setup output go to stderr. Exit codes as `up`; an invalid `name` is exit 2.
+  setup output go to stderr. Exit codes as `up`. Each `/` in `name` becomes `-` before the slug
+  check (`feat/x` → task `feat-x`), so names that differ only by `/` vs `-` share one task; any
+  other invalid `name` (`.`/`..` segments included) is exit 2.
 - `worktree-remove` (`worktree_path`, optional `cwd`): finds the repo from the worktree (from
   `cwd` when the directory is gone), the manifest entry whose `path` is `worktree_path`
   (compared canonicalized), and runs `down <task>` without `--force` and without

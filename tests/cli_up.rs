@@ -863,6 +863,55 @@ fn up_names_the_worktree_that_holds_the_branch() {
     assert_eq!(manifest_entries(&fx).len(), 0);
 }
 
+/// The busy-branch hint parses git's message, so git must speak English whatever the locale.
+/// The shim plays a translated git: it rewrites the message unless `LC_ALL` is `C`.
+#[cfg(unix)]
+#[test]
+fn up_busy_branch_hint_survives_a_non_english_locale() {
+    let fx = Fixture::new();
+    fx.config(&fx.repo, "", "");
+    let real = std::env::split_paths(&std::env::var_os("PATH").unwrap())
+        .map(|d| d.join("git"))
+        .find(|p| p.is_file())
+        .expect("git on PATH");
+    fx.fake_bin(
+        "git",
+        &format!(
+            r#"if [ "$LC_ALL" = C ] && [ "$LANG" = C ]; then exec '{real}' "$@"; fi
+'{real}' "$@" 2>"$TMPDIR/git.err"; rc=$?
+sed -e 's/already used by worktree/wird bereits von Arbeitsverzeichnis verwendet/' \
+    -e 's/already checked out/bereits ausgecheckt/' "$TMPDIR/git.err" >&2
+exit $rc"#,
+            real = real.display()
+        ),
+    );
+    let other = fx.root.path().join("elsewhere");
+    git(
+        &fx.repo,
+        &[
+            "worktree",
+            "add",
+            "-b",
+            "berth/busy",
+            other.to_str().unwrap(),
+        ],
+    );
+    let out = fx
+        .berth()
+        .env("LC_ALL", "de_DE.UTF-8")
+        .env("LANG", "de_DE.UTF-8")
+        .env("LANGUAGE", "de")
+        .args(["up", "busy"])
+        .output()
+        .unwrap();
+    assert_eq!(out.status.code(), Some(3), "{}", stderr(&out));
+    assert!(
+        stderr(&out).contains("checked out in another worktree"),
+        "{}",
+        stderr(&out)
+    );
+}
+
 #[test]
 fn up_in_a_repo_without_commits_says_so() {
     let fx = Fixture::new();
