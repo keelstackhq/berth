@@ -35,7 +35,8 @@ berth hook worktree-create|worktree-remove|session-start|statusline   (Claude Co
 
 Global flags: `-C <dir>`, `--json`, `--no-color`, `-v` (prints each git command and hook command
 to stderr, never file contents or env values). `<task>` is a slug `^[a-z0-9][a-z0-9-]{0,47}$`;
-`berth hook worktree-create` turns each `/` in the name into `-` (`feat/x` → `feat-x`).
+`berth hook worktree-create` turns each `/` in the name into `-` (`feat/x` → `feat-x`) and
+refuses (exit 1) a second name that maps onto the same task.
 
 - `up` makes the worktree and branch (`berth/<task>`), copies the allow-listed untracked files,
   reserves a port block and runs `[setup]`. Repeating it on a healthy task is `ok`; a different

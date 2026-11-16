@@ -93,10 +93,9 @@ fn worktree_create(cli: &Cli, payload: &Value) -> Result<i32, BerthError> {
     let cwd = required(payload, "cwd")?;
     // Claude Code names may nest (`feat/x`); each `/` becomes `-`, then the slug rules apply,
     // so `.`, `..` and empty segments are still refused.
-    let task: Task = required(payload, "name")?
-        .replace('/', "-")
-        .parse()
-        .map_err(BerthError::Usage)?;
+    let name = required(payload, "name")?;
+    let task: Task = name.replace('/', "-").parse().map_err(BerthError::Usage)?;
+    let hook_name = (name != task.as_str()).then(|| name.to_string());
     let ctx = context(Path::new(cwd), cli)?;
     let args = UpArgs {
         task,
@@ -104,6 +103,7 @@ fn worktree_create(cli: &Cli, payload: &Value) -> Result<i32, BerthError> {
         branch: None,
         no_setup: false,
         keep_on_failure: false,
+        hook_name,
     };
     let report = up::up(&ctx, &args)?;
     log_report(&report);
