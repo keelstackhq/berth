@@ -29,6 +29,10 @@ pub struct Entry {
     pub owner: Owner,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub db: Option<DbEntry>,
+    /// The `berth hook worktree-create` name when it differs from `task` (`feat/x` for
+    /// `feat-x`); only that name may reuse the task.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hook_name: Option<String>,
 }
 
 /// The task's database (spec §6). `name` is the postgres database, the compose project, or the

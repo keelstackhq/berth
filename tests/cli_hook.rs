@@ -162,10 +162,66 @@ fn create_config_error_exits_3() {
 }
 
 #[test]
+fn create_name_with_slash_becomes_a_dashed_task() {
+    let fx = Fixture::new();
+    fx.config(&fx.repo, "", "");
+    let out = create(&fx, "feat/x");
+    assert_eq!(code(&out), 0, "{}", stderr(&out));
+    assert_eq!(stdout(&out), format!("{}\n", wt(&fx, "feat-x").display()));
+    let tasks: Vec<String> = entries(&fx)
+        .iter()
+        .map(|e| e["task"].as_str().unwrap().to_string())
+        .collect();
+    assert_eq!(tasks, ["feat-x"]);
+    assert!(!git(&fx.repo, &["branch", "--list", "berth/feat-x"]).is_empty());
+    // Same name again: idempotent, same path.
+    let again = create(&fx, "feat/x");
+    assert_eq!(code(&again), 0, "{}", stderr(&again));
+    assert_eq!(stdout(&again), stdout(&out));
+}
+
+/// `a/b` and `a-b` map to one task; the second name must not share (or later remove) the
+/// first one's worktree, in either order.
+#[test]
+fn create_refuses_a_name_that_maps_onto_another_names_task() {
+    for (first, second) in [("a/b", "a-b"), ("a-b", "a/b")] {
+        let fx = Fixture::new();
+        fx.config(&fx.repo, "", "");
+        let out = create(&fx, first);
+        assert_eq!(code(&out), 0, "{first}: {}", stderr(&out));
+        let clash = create(&fx, second);
+        assert_eq!(code(&clash), 1, "{second}: {}", stderr(&clash));
+        assert_eq!(stdout(&clash), "");
+        let err = stderr(&clash);
+        assert!(err.contains("refused"), "{err}");
+        assert!(err.contains(&format!("`{first}`")), "{err}");
+        assert!(err.contains("berth down a-b"), "{err}");
+        assert_eq!(entries(&fx).len(), 1);
+        // The first name still gets its own worktree back.
+        let again = create(&fx, first);
+        assert_eq!(code(&again), 0, "{first}: {}", stderr(&again));
+        assert_eq!(stdout(&again), stdout(&out));
+    }
+}
+
+#[test]
+fn create_records_the_hook_name_only_when_it_differs_from_the_task() {
+    let fx = Fixture::new();
+    fx.config(&fx.repo, "", "");
+    assert_eq!(code(&create(&fx, "feat/x")), 0);
+    assert_eq!(code(&create(&fx, "plain")), 0);
+    let all = entries(&fx);
+    let by = |t: &str| all.iter().find(|e| e["task"] == t).unwrap().clone();
+    assert_eq!(by("feat-x")["hook_name"], "feat/x");
+    assert!(by("plain").get("hook_name").is_none(), "{all:?}");
+}
+
+#[test]
 fn create_bad_name_exits_2() {
     let fx = Fixture::new();
     fx.config(&fx.repo, "", "");
-    for name in ["Bold Oak", "a/b", "", "-x"] {
+    // `/` maps to `-`, then the slug rules apply: `.` and `..` can never reach a path.
+    for name in ["Bold Oak", "", "-x", "/x", "../x", "a/../b", "a/./b"] {
         let out = create(&fx, name);
         assert_eq!(code(&out), 2, "{name}: {}", stderr(&out));
         assert_eq!(stdout(&out), "");

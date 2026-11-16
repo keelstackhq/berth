@@ -389,6 +389,22 @@ fn existing(
     let task = entry.task.as_str();
     let mut report = Report::new("up");
     report.worktrees = vec![entry.clone()];
+    // `a/b` and `a-b` map to one task: only the name that made it may reuse it.
+    let made_by = entry.hook_name.as_deref().unwrap_or(task);
+    let asked = args.hook_name.as_deref().unwrap_or(task);
+    if made_by != asked {
+        report.items.push(Item::new(
+            "worktree",
+            task,
+            Action::Refused,
+            format!(
+                "task {task} belongs to name `{made_by}`, not `{asked}`; pick another name, \
+                 or run `berth down {task}` once `{made_by}` is done"
+            ),
+        ));
+        report.exit_code = 1;
+        return Ok(report);
+    }
     let owner_alive = sys::pid_alive(entry.owner.pid, &entry.owner.host);
     if entry.state == State::Creating && owner_alive {
         report.items.push(Item::new(
@@ -663,6 +679,7 @@ fn create_worktree(
             .as_ref()
             .zip(db_plan.as_ref())
             .map(|(c, p)| db::entry(p, c)),
+        hook_name: args.hook_name.clone(),
     };
     manifest.upsert(entry.clone());
     manifest.save(main)?;

@@ -70,7 +70,7 @@ copy-listed file git does not ignore, worktree limit reached, task being created
 invalid task slug, invalid `--branch`; clap usage errors exit 2) · `3` config or environment
 error (unknown `berth.toml` key, git missing or too old, unknown or `-`-prefixed `--base`: "unknown
 --base ref `<x>`; berth never fetches, run `git fetch` first", no free port block, lock timeout,
-setup hook failed, a `gc` removal that failed; a repo with no commits: "the repo has no commits yet"; the task branch checked out in another worktree: git's message plus a hint to pick another task or `--branch`); the message says how to fix it.
+setup hook failed, a `gc` removal that failed; a repo with no commits: "the repo has no commits yet"; the task branch checked out in another worktree: git's message plus a hint to pick another task or `--branch`; that `git worktree add` runs with `LC_ALL=C LANG=C` so the match holds in any locale); the message says how to fix it.
 
 Justification: berth follows splice's scheme (0 ok · 1 refused/drift · 2 usage · 3 config or
 environment) because berth has no human steps, which is what hoist's `2` means. Agents only need
@@ -96,7 +96,11 @@ protocol, so `--json` is a usage error (exit 2), as are malformed JSON and a mis
 field (message on stderr). `-C` is ignored; the directory comes from the payload.
 - `worktree-create` (`cwd`, `name`): `berth -C <cwd> up <name>` with default flags. stdout is the
   absolute worktree path (no `.`/`..` segments) and a newline, nothing else; the table, logs and
-  setup output go to stderr. Exit codes as `up`; an invalid `name` is exit 2.
+  setup output go to stderr. Exit codes as `up`. Each `/` in `name` becomes `-` before the slug
+  check (`feat/x` → task `feat-x`); any other invalid `name` (`.`/`..` segments included) is
+  exit 2. A name that differs from its task is recorded as the entry's `hook_name` (§6). Only
+  the name that made a task may reuse it: `a-b` after `a/b` (or `a/b` after `a-b`, or
+  `berth up a-b` after `a/b`) is refused, exit 1, so two sessions never share a worktree.
 - `worktree-remove` (`worktree_path`, optional `cwd`): finds the repo from the worktree (from
   `cwd` when the directory is gone), the manifest entry whose `path` is `worktree_path`
   (compared canonicalized), and runs `down <task>` without `--force` and without
@@ -215,6 +219,8 @@ database, the compose project, or the sqlite path relative to the worktree; `cre
 right after `createdb` succeeds (berth drops only what it created); `host`/`port`/`user` are
 recorded for postgres only, so `down` works after config edits. Without `[db]` the field is
 absent (an M1 manifest loads and is written back unchanged); never a URL or password.
+An entry made by `berth hook worktree-create` from a name that is not the task itself also has
+`"hook_name": "feat/x"` (§3); otherwise the field is absent.
 
 `state`: `creating` → `ready` | `failed`; `removing`. `copied` lists paths only, never contents or
 hashes. `env` holds only berth-derived and `[env]` values (§7), which are non-secret by rule.

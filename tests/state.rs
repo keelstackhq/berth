@@ -38,6 +38,7 @@ fn entry(task: &str) -> Entry {
             pid: 4242,
             host: "laptop".into(),
         },
+        hook_name: None,
         db: None,
     }
 }

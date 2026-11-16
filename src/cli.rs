@@ -93,6 +93,9 @@ pub struct UpArgs {
     /// Keep the workspace when setup fails
     #[arg(long)]
     pub keep_on_failure: bool,
+    /// The hook name this task came from, when it differs from the task (`feat/x`).
+    #[arg(skip)]
+    pub hook_name: Option<String>,
 }
 
 #[derive(Debug, Args)]
