@@ -538,7 +538,8 @@ All fetching-free; versions are **not** stated here and are pinned exactly in th
 
 - `.github/workflows/ci.yml`: one job, matrix (`fail-fast: false`) `ubuntu-latest` + `macos-latest` + `windows-latest`: `cargo fmt --check`,
   `cargo clippy --all-targets --locked -- -D warnings`, `cargo test` (nextest if installed). Plus a
-  `ci-ok` aggregate, the family pattern. No network in tests, so no secrets in CI.
+  `ci-ok` aggregate, the family pattern. No network in tests, so no secrets in CI. A draft PR
+  fails `ci` in its first step (so `ci-ok` stays red); `ready_for_review` runs it in full.
 - Release (M3) through `hoist release`: static musl Linux and macOS binaries on GitHub Releases,
   the npm launcher, `cargo install`; Windows (`win32-x64`, `--format pwsh`) in M3 too.
 - Release files (hoist's own layout): root `hoist.toml` (`[publish] crates = {}`, `github_release`
