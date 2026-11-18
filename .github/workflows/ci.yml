@@ -2,6 +2,9 @@ name: ci
 
 on:
   pull_request:
+    # ci-minutes: allow paths macOS/Windows worktree and port handling must be checked before merge
+    # ready_for_review: a draft fails fast below, so it needs a full run once it is ready.
+    types: [opened, synchronize, reopened, ready_for_review]
   push:
     branches: [main]
 
@@ -27,6 +30,14 @@ jobs:
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30
     steps:
+      # CI minutes: a draft PR fails here before any build. A step, not a job-level `if:`, so a
+      # draft never leaves `ci` skipped and `ci-ok` green.
+      - name: not a draft
+        env:
+          DRAFT: ${{ github.event.pull_request.draft || false }}
+        shell: bash
+        run: |
+          if [ "$DRAFT" = true ]; then echo "::error::draft: CI not run, mark ready for review"; exit 1; fi
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
       - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
         with:
