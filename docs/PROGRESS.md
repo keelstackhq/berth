@@ -62,6 +62,8 @@ whole-branch review fixes done; PR #3.
 - 2026-11-15 · release v0.2.1 prepared · version 0.2.1 in `Cargo.toml`, `Cargo.lock`, six `npm/*/package.json` (+ launcher `optionalDependencies`), `pnpm-lock.yaml` (specifiers); no CHANGELOG or fragments in this repo · patch bump: `fix` doctor --fix continues past failed removals, clearer empty-repo and busy-branch errors (#18); fmt, clippy -D warnings, `cargo test --locked` green; tag, publish left to owner
 - 2026-11-16 · Fix round · busy-branch `git worktree add` runs with `LC_ALL=C LANG=C` (translated git still gets the hint; tested with a translating git shim); `hook worktree-create` maps `/` in names to `-` (`feat/x` → `feat-x`), `.`/`..` still exit 2, the original name is kept as `hook_name` and a different name mapping onto that task is refused (exit 1); spec §3/§6/§8, README · 4 tests seen failing first, fmt, clippy, `cargo test --locked` green
 
+- 2026-11-18 · bosun 0.20.0 adopted, policy autonomous, profile rust · `bosun adopt`; actions pinned to ci.yml SHAs; `bosun gate ci-minutes` reports 4 findings in ci.yml/release.yml (left as is); fmt, clippy, test green
+
 ## Blocked
 
 - **Branch protection.** Protect `main` and require the `ci-ok` status check.
@@ -69,3 +71,4 @@ whole-branch review fixes done; PR #3.
   (`docs/integration.md`); that is hull's own milestone, not started here.
 - **Decisions row.** Propose in keelstackhq/decisions: per-task agent workspaces go through
   `berth`; `.agents/worktrees.json` (version 1) is the read contract for other tools.
+- **bosun owner steps.** `bosun keygen --enroll`; require `bosun-ok`, `risk-check`, `review-verdict`, `main-open` (plus `ci-ok`) on `main`; paste `bosun setup-snippet` as the cloud environment setup script; merge the setup PR; run `bosun doctor --remote`.
