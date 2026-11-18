@@ -2,6 +2,7 @@ name: ci
 
 on:
   pull_request:
+    # ci-minutes: allow paths macOS/Windows worktree and port handling must be checked before merge
     # ready_for_review: a draft fails fast below, so it needs a full run once it is ready.
     types: [opened, synchronize, reopened, ready_for_review]
   push:
